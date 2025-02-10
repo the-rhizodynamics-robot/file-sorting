@@ -3,9 +3,10 @@ name: Build and Push Docker Image to GHCR
 on:
   push:
     branches:
-      - main  # Runs on changes to the main branch
+      - main 
     paths:
-      - 'docker_files/**'  # Only trigger when files in docker_files/ change
+      - 'docker_files/**' 
+      - 'github/workflows/docker-publish.yml'
 
   workflow_dispatch:  
 
