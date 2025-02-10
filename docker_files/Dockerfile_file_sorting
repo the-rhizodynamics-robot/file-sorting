@@ -1,5 +1,5 @@
 # Use an official Python image as the base
-FROM python:3.8-slim
+FROM python:3.7-slim
 
 # Set environment variables to avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive

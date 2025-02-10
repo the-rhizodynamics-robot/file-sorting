@@ -1,0 +1,33 @@
+name: Build and Push Docker Image to GHCR
+
+on:
+  push:
+    branches:
+      - main  # Runs on changes to the main branch
+    paths:
+      - 'docker_files/**'  # Only trigger when files in docker_files/ change
+
+  workflow_dispatch:  
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write  
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and tag Docker image
+        run: |
+          docker build -t ghcr.io/${{ github.repository_owner }}/my-image:latest \
+                       -t ghcr.io/${{ github.repository_owner }}/my-image:${{ env.GIT_SHA }} \
+                       -f Dockerfile_file_sorting docker_files/.
+
+      - name: Push to GHCR
+        run: docker push ghcr.io/${{ github.repository_owner }}/file-sorting-env:latest
