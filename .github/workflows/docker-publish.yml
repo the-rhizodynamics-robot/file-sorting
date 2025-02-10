@@ -31,7 +31,7 @@ jobs:
         run: |
           docker build -t ghcr.io/${{ github.repository_owner }}/file-sorting-env:latest \
                        -t ghcr.io/${{ github.repository_owner }}/file-sorting-env:${{ env.GIT_SHA }} \
-                       -f Dockerfile_file_sorting docker_files/.
+                       -f docker_files/Dockerfile_file_sorting docker_files/.
 
       - name: Push to GHCR
         run: docker push ghcr.io/${{ github.repository_owner }}/file-sorting-env:latest
