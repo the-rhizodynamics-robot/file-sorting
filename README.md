@@ -7,4 +7,8 @@ sort, check if folder in in_progress exists.   
   -if not, make video, stabilize, and clean up (zip images)
 
 
--work on the rotation thing
+Next steps:
+-log into VM and get maybe 3 zips? successive runs with overlaping and non-overlapping boxes (at least get one), also get models (qr and seed)... I think that's all.
+-Parameterize NF script.
+-work on the rotation thing.
+

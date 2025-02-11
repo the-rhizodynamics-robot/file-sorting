@@ -1,0 +1,25 @@
+#!/usr/bin/env nextflow
+
+params.sort_path = "/mnt/data/file-sorting"
+params.robot_number = 1
+params.boxes_per_shelf = 7
+params.transfer = false
+params.do_not_stabilize = false
+
+process file_sorting {
+    container 'ghcr.io/the-rhizodynamics-robot/file-sorting-env:latest'
+
+    script:
+    """
+    python3 sorting_runner.py \
+        --sort_path ${params.sort_path} \
+        --robot_number ${params.robot_number} \
+        --boxes_per_shelf ${params.boxes_per_shelf} \
+        ${params.transfer ? '--transfer' : ''} \
+        ${params.do_not_stabilize ? '--do_not_stabilize' : ''}
+    """
+}
+
+workflow {
+    file_sorting()
+}
