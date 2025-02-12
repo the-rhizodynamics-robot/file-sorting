@@ -23,11 +23,11 @@ import time
 from PIL import Image
 
 
-def init(robot, boxes_per_shelf):
+def init(robot, boxes_per_shelf, sort_path, staging_path):
     """ Declare constants for save paths"""
 
     global ARCHIVE_PATH
-    global MOUNTED_BUCKET_STAGING_PATH
+    global STAGING_PATH
     global UNSORTED_UNLABELED_PATH
     global SORTED_UNLABELED_PATH
     global CURRENT_EXP_PATH
@@ -40,10 +40,9 @@ def init(robot, boxes_per_shelf):
     global BOXES_PER_SHELF
     global STABILIZED_VIDEO_PATH
 
-    abspath = os.path.split(os.path.split(os.path.abspath(__file__))[0])[0]
-    INSTALL_PATH = os.path.dirname(abspath)
+    INSTALL_PATH = os.path.abspath(sort_path)
     DATA_PATH = os.path.join(INSTALL_PATH, "data", "robot", "")
-    MOUNTED_BUCKET_STAGING_PATH = os.path.join(INSTALL_PATH, "data", "unsorted_unlabeled_zipped", "")
+    STAGING_PATH = os.path.join(INSTALL_PATH, "data", "unsorted_unlabeled_zipped", "")
     ARCHIVE_PATH = os.path.join(INSTALL_PATH, "data", "unsorted_unlabeled_processed", "")
     UNSORTED_UNLABELED_PATH = os.path.join(DATA_PATH, "master_data", "unsorted_unlabeled", "")
     SORTED_UNLABELED_PATH = os.path.join(DATA_PATH, "master_data", "sorted_unlabeled", "")
@@ -399,14 +398,14 @@ def transfer_to_instance(run_name):
     except Exception as e:
         print("file exists")
         print(e)
-    with zipfile.ZipFile(MOUNTED_BUCKET_STAGING_PATH + run_name,"r") as zip_ref:
+    with zipfile.ZipFile(STAGING_PATH + run_name,"r") as zip_ref:
         zip_ref.extractall(UNSORTED_UNLABELED_PATH + directory)
     os.chdir("/home")
 
 
 def clear_staging_bucket(zip_to_remove):
-    #os.remove(MOUNTED_BUCKET_STAGING_PATH + "/" + zip_to_remove)
-    shutil.move(MOUNTED_BUCKET_STAGING_PATH + "/" + zip_to_remove, ARCHIVE_PATH + "/" + zip_to_remove)
+    #os.remove(STAGING_PATH + "/" + zip_to_remove)
+    shutil.move(STAGING_PATH + "/" + zip_to_remove, ARCHIVE_PATH + "/" + zip_to_remove)
 
 
 def listdir_nohidden(path):

@@ -18,7 +18,12 @@ parser.add_argument("-i", "--sort_path",
                     action="store",
                     dest="sort_path",
                     help="Base directory for file sorting project",
-                    default="/mnt/data/file-sorting")
+                    default="/mnt/c/Users/iwt/Desktop/file_sorting_test/")
+parser.add_argument("-s", "--staging_path",
+                    action="store",
+                    dest="staging_path",
+                    help="Staging directory for file sorting project",
+                    default="/mnt/c/Users/iwt/Desktop/sorting_files/zips/")
 parser.add_argument("-b", "--boxes_per_shelf",
                     action="store",
                     dest="boxes_per_shelf",
@@ -39,10 +44,11 @@ args = parser.parse_args()
 
 # Override paths with sort_path
 sort_path = args.sort_path
+staging_path = args.staging_path
 robot = f"robot{args.robot_number}/"
 boxes_per_shelf = args.boxes_per_shelf
 
-sf.init(robot, boxes_per_shelf)
+sf.init(robot, boxes_per_shelf, sort_path, staging_path)
 
 # Ensure directory structure exists
 directories = [
@@ -69,7 +75,7 @@ sf.re_merge()
 sf.clear_junk()
 
 current_exp_list = []
-data_path_list = sf.listdir_nohidden(sf.MOUNTED_BUCKET_STAGING_PATH)
+data_path_list = sf.listdir_nohidden(sf.STAGING_PATH)
 
 # sort in ascending order by value
 # in order to create a value representative of the date the sort_date function is used
