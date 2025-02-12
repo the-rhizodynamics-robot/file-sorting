@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 
     Entry point of file-sorting program.
@@ -104,4 +106,4 @@ else:
     if not review_needed:
         sf.final_transfer(current_exp_list, stabilize = not args.do_not_stabilize)
     else:
-        print("skipping final transfer, there are junk review items to be dealt with\n*****************")``
+        print("skipping final transfer, there are junk review items to be dealt with\n*****************")

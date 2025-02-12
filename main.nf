@@ -12,7 +12,7 @@ process file_sorting {
 
     script:
     """
-    python3 sorting_runner.py \
+    robot_image_sorting.py \
         --sort_path ${params.sort_path} \
         --staging_path ${params.staging_path} \
         --robot_number ${params.robot_number} \
