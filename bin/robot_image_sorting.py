@@ -11,6 +11,7 @@
 import src.sorting_functions as sf
 import argparse
 import os
+import sys
 
 # Dynamically add `bin/src/` to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
@@ -26,6 +27,11 @@ parser.add_argument("-s", "--staging_path",
                     dest="staging_path",
                     help="Staging directory for file sorting project",
                     default="/mnt/c/Users/iwt/Desktop/sorting_files/zips/")
+parser.add_argument("-m", "--model_path",
+                    action="store",
+                    dest="model_path",
+                    help="Path to model files",
+                    default="/mnt/c/Users/iwt/Desktop/sorting_files/")
 parser.add_argument("-b", "--boxes_per_shelf",
                     action="store",
                     dest="boxes_per_shelf",
@@ -49,8 +55,9 @@ sort_path = args.sort_path
 staging_path = args.staging_path
 robot = f"robot{args.robot_number}/"
 boxes_per_shelf = args.boxes_per_shelf
+model_path = args.model_path
 
-sf.init(robot, boxes_per_shelf, sort_path, staging_path)
+sf.init(robot, boxes_per_shelf, sort_path, staging_path, model_path)
 
 # Ensure directory structure exists
 directories = [

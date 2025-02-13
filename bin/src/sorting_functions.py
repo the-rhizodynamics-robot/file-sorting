@@ -23,7 +23,7 @@ import time
 from PIL import Image
 
 
-def init(robot, boxes_per_shelf, sort_path, staging_path):
+def init(robot, boxes_per_shelf, sort_path, staging_path, model_path):
     """ Declare constants for save paths"""
 
     global ARCHIVE_PATH
@@ -41,8 +41,8 @@ def init(robot, boxes_per_shelf, sort_path, staging_path):
     global STABILIZED_VIDEO_PATH
 
     INSTALL_PATH = os.path.abspath(sort_path)
-    DATA_PATH = os.path.join(INSTALL_PATH, "data", "robot", "")
-    STAGING_PATH = os.path.join(INSTALL_PATH, "data", "unsorted_unlabeled_zipped", "")
+    DATA_PATH = os.path.join(INSTALL_PATH, "data", robot, "")
+    STAGING_PATH = os.path.join(staging_path, "")
     ARCHIVE_PATH = os.path.join(INSTALL_PATH, "data", "unsorted_unlabeled_processed", "")
     UNSORTED_UNLABELED_PATH = os.path.join(DATA_PATH, "master_data", "unsorted_unlabeled", "")
     SORTED_UNLABELED_PATH = os.path.join(DATA_PATH, "master_data", "sorted_unlabeled", "")
@@ -57,7 +57,7 @@ def init(robot, boxes_per_shelf, sort_path, staging_path):
 
     # load all retinanet models
     keras.backend.tensorflow_backend.set_session(get_session())
-    QR_MODEL_PATH = os.path.join(INSTALL_PATH, "data", "models", "qrInference.h5")
+    QR_MODEL_PATH = os.path.join(model_path, "qrInference.h5")
     QR_MODEL = models.load_model(QR_MODEL_PATH, backbone_name='resnet50')
 
 
@@ -140,7 +140,7 @@ def label(base_path):
     for d in dirlist[1:]:
         # change to each subdirectory of sorted, unlabelled data
         os.chdir(d)
-        im_list = random.choices(listdir_nohidden(d), k=10)
+        im_list = random.choices(listdir_nohidden(d), k=10, replace=True)
         crop_sum=0
 
         for img in im_list:
@@ -362,7 +362,8 @@ def clear_junk():
     junk_exp_path = JUNK_EXP_PATH
     junk_review_path = JUNK_REVIEW_PATH
     remerge_path = JUNK_REVIEW_PATH + "re_merge/"
-    
+    os.makedirs(remerge_path, exist_ok=True)
+
     print("Clearing out junk folders")
     for file in listdir_nohidden(junk_exp_path):
         shutil.rmtree(junk_exp_path+file) 
@@ -376,7 +377,7 @@ def clear_junk():
 
 def sort_date(elem):
     """
-        give high weightage to year, low weightage to RUN number
+        give high weight to year, low weight to RUN number
         format = M/D/YY/RUN(if any)/SHELVES
         sort_date will sort the data_path_list based on date and number of shelves
     """
