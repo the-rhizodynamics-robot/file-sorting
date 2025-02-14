@@ -12,7 +12,8 @@ Next steps:
 
 -log into VM and get maybe 3 zips? successive runs with overlaping and non-overlapping boxes (at least get one), also get models (qr and seed)... I think that's all.
 
--test basic implementation and iterate.
+-test basic implementation and iterate. CHECK.
 
 -work on the rotation thing.
 
+-add onComplete hook to (on success) clear staging_area.

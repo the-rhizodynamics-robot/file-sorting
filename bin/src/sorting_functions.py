@@ -96,7 +96,7 @@ def sort(base_path, shelves):
     timestamps.sort()
     # this will make a number of directories in the out directory equal to the number of boxes, names 1\, 2\, 3\, etc
     for x in range(num_boxes):
-        os.mkdir(mypathout+"/"+str(x+1))
+        os.makedirs(mypathout+"/"+str(x+1), exist_ok=True)
     os.chdir("/home")
 
     # this double loop will loop over the sequence 1:len(onlyfiles),
@@ -122,13 +122,11 @@ def label(base_path):
     finished_exp_path = FINISHED_EXP_PATH
     mypathin = UNSORTED_UNLABELED_PATH + base_path
         
-    # make current exp path, finished exp path, and junk exp path directory if they don't already exist.
-    if not os.path.isdir(current_exp_path):
-        os.mkdir(current_exp_path)
-    if not os.path.isdir(junk_exp_path):
-        os.mkdir(junk_exp_path)
-    if not os.path.isdir(finished_exp_path):
-        os.mkdir(finished_exp_path)
+    # Make directories if they don't already exist
+    os.makedirs(current_exp_path, exist_ok=True)
+    os.makedirs(junk_exp_path, exist_ok=True)
+    os.makedirs(finished_exp_path, exist_ok=True)
+
 
     # This is intended to loop over all folders in sorted, unlabelled directory.
     # It will scan for QR codes until 3 codes are found, then take the modal code and move the images into the current
@@ -140,7 +138,7 @@ def label(base_path):
     for d in dirlist[1:]:
         # change to each subdirectory of sorted, unlabelled data
         os.chdir(d)
-        im_list = random.choices(listdir_nohidden(d), k=10, replace=True)
+        im_list = random.choices(listdir_nohidden(d), k=10)
         crop_sum=0
 
         for img in im_list:
@@ -395,7 +393,7 @@ def transfer_to_instance(run_name):
     directory = (os.path.splitext(run_name)[0])
     print(directory)
     try:
-        os.makedirs(UNSORTED_UNLABELED_PATH + directory)
+        os.makedirs(UNSORTED_UNLABELED_PATH + directory, exist_ok=True)
     except Exception as e:
         print("file exists")
         print(e)

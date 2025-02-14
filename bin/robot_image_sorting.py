@@ -106,7 +106,7 @@ else:
     sf.label(run_name)
 
     # safely removes zip of current run
-    sf.clear_staging_bucket(data_path)        
+    # sf.clear_staging_bucket(data_path)        
 
     review_needed = sf.junk_review()
 

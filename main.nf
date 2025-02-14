@@ -4,7 +4,7 @@ params.sort_path = "/mnt/c/Users/iwt/Desktop/file_sorting_test/"
 params.staging_path = "/mnt/c/Users/iwt/Desktop/sorting_files/zips/"
 params.model_path = "/mnt/c/Users/iwt/Desktop/sorting_files/"
 params.robot_number = 1
-params.boxes_per_shelf = 7
+params.boxes_per_shelf = 3
 params.transfer = false
 params.do_not_stabilize = false
 
