@@ -103,10 +103,7 @@ else:
     run_name = os.path.splitext(data_path)[0]
     print(run_name)
     sf.sort(run_name, run_name[-1:])
-    sf.label(run_name)
-
-    # safely removes zip of current run
-    # sf.clear_staging_bucket(data_path)        
+    sf.label(run_name)    
 
     review_needed = sf.junk_review()
 

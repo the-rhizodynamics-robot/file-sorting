@@ -402,11 +402,6 @@ def transfer_to_instance(run_name):
     os.chdir("/home")
 
 
-def clear_staging_bucket(zip_to_remove):
-    #os.remove(STAGING_PATH + "/" + zip_to_remove)
-    shutil.move(STAGING_PATH + "/" + zip_to_remove, ARCHIVE_PATH + "/" + zip_to_remove)
-
-
 def listdir_nohidden(path):
     """ for dealing with the infernal .ipynb_checkpoint files created everywhere """
     return [f for f in sorted(os.listdir(path)) if not f.startswith('.')]
