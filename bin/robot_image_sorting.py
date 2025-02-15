@@ -17,16 +17,14 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
 parser = argparse.ArgumentParser(description="Script for sorting images and creating videos.")
-parser.add_argument("-i", "--sort_path",
+parser.add_argument("-i", "--images_path",
                     action="store",
                     dest="sort_path",
-                    help="Base directory for file sorting project",
-                    default="/mnt/c/Users/iwt/Desktop/file_sorting_test/")
-parser.add_argument("-s", "--staging_path",
+                    help="Path to images to be sorted (zip or directory)")
+parser.add_argument("-s", "--archive_path",
                     action="store",
                     dest="staging_path",
-                    help="Staging directory for file sorting project",
-                    default="/mnt/c/Users/iwt/Desktop/sorting_files/zips/")
+                    help="Path to move sorted images to")
 parser.add_argument("-m", "--model_path",
                     action="store",
                     dest="model_path",
