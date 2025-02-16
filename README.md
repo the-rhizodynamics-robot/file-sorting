@@ -14,6 +14,8 @@ Next steps:
 
 -test basic implementation and iterate. CHECK.
 
+-Need to re-implement archive function call.
+
 FEATURES:
 
 -work on the rotation thing.

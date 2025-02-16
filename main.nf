@@ -5,8 +5,8 @@ params.sort_path = ""
 params.archive_path = ""
 params.model_path = "/mnt/c/Users/iwt/Desktop/sorting_files/"
 params.boxes_per_shelf = 3
-params.transfer = false
-params.do_not_stabilize = false
+params.finish_only = false
+params.stabilize = true
 params.unzip = true
 
 path_ch = Channel.of([params.images_path, params.sort_path, params.model_path])
@@ -23,8 +23,8 @@ process file_sorting {
         --sort_path ${ssort_path} \
         --model_path ${model_path} \
         --boxes_per_shelf ${params.boxes_per_shelf} \
-        ${params.transfer ? '--transfer' : ''} \
-        ${params.do_not_stabilize ? '--do_not_stabilize' : ''} \
+        ${params.finish_only ? '--transfer' : ''} \
+        ${params.do_not_stabilize ? '--stabilize' : ''} \
         ${params.unzip ? '--unzip' : ''}
     """
 }

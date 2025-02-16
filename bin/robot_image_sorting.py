@@ -19,54 +19,51 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 parser = argparse.ArgumentParser(description="Script for sorting images and creating videos.")
 parser.add_argument("-i", "--images_path",
                     action="store",
-                    dest="sort_path",
-                    help="Path to images to be sorted (zip or directory)")
-parser.add_argument("-s", "--archive_path",
+                    dest="images_path",
+                    help="Path to images to be sorted (zip or directory)",
+                    required=True)
+parser.add_argument("-s", "--sort_path",
                     action="store",
-                    dest="staging_path",
-                    help="Path to move sorted images to")
+                    dest="sort_path",
+                    help="Base directory for file sorting project",
+                    required=True)
 parser.add_argument("-m", "--model_path",
                     action="store",
                     dest="model_path",
-                    help="Path to model files",
-                    default="/mnt/c/Users/iwt/Desktop/sorting_files/")
+                    help="Path to model files")
 parser.add_argument("-b", "--boxes_per_shelf",
                     action="store",
                     dest="boxes_per_shelf",
-                    help="Boxes per shelf.",
-                    default=1)
-parser.add_argument("-t", "--transfer",
-                    help="Transfer all experiments to finished",
+                    help="Boxes per shelf.")
+parser.add_argument("-f", "--finish_only",
+                    help="Transfer all experiments to finished/ and create videos",
                     action="store_true")
-parser.add_argument("-d", "--do_not_stabilize",
+parser.add_argument("-b", "--stabilize",
                     help="Do not stabilize videos",
                     action="store_true")
-parser.add_argument("-r", "--robot_number",
-                    action="store",
-                    dest="robot_number",
-                    help="Robot number where data was generated (1, 2, 3, etc).",
-                    default="")
+parser.add_argument("-u", "--unzip",
+                    help="Unzip the images",
+                    action="store_true")
 args = parser.parse_args()
 
 # Override paths with sort_path
+images_path = args.images_path
 sort_path = args.sort_path
-staging_path = args.staging_path
-robot = f"robot{args.robot_number}/"
 boxes_per_shelf = args.boxes_per_shelf
 model_path = args.model_path
 
-sf.init(robot, boxes_per_shelf, sort_path, staging_path, model_path)
+sf.init(boxes_per_shelf, sort_path, staging_path, model_path)
 
 # Ensure directory structure exists
 directories = [
     "data/unsorted_unlabeled_zipped",
     "data/unsorted_unlabeled_processed",
-    "data/" + robot + "/master_data/unsorted_unlabeled",
-    "data/" + robot + "/master_data/sorted_unlabeled",
-    "data/" + robot + "/master_data/current_exp",
-    "data/" + robot + "/master_data/finished_exp",
-    "data/" + robot + "/master_data/junk_exp",
-    "data/" + robot + "/master_data/junk_review",
+    "data/master_data/unsorted_unlabeled",
+    "data/master_data/sorted_unlabeled",
+    "data/master_data/current_exp",
+    "data/master_data/finished_exp",
+    "data/master_data/junk_exp",
+    "data/master_data/junk_review",
     "data/videos/unstabilized",
     "data/videos/stabilized"
 ]
@@ -106,6 +103,6 @@ else:
     review_needed = sf.junk_review()
 
     if not review_needed:
-        sf.final_transfer(current_exp_list, stabilize = not args.do_not_stabilize)
+        sf.final_transfer(current_exp_list, stabilize = args.stabilize)
     else:
         print("skipping final transfer, there are junk review items to be dealt with\n*****************")

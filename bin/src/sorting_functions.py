@@ -23,7 +23,7 @@ import time
 from PIL import Image
 
 
-def init(robot, boxes_per_shelf, sort_path, staging_path, model_path):
+def init(boxes_per_shelf, sort_path, staging_path, model_path):
     """ Declare constants for save paths"""
 
     global ARCHIVE_PATH
@@ -40,10 +40,10 @@ def init(robot, boxes_per_shelf, sort_path, staging_path, model_path):
     global BOXES_PER_SHELF
     global STABILIZED_VIDEO_PATH
 
-    INSTALL_PATH = os.path.abspath(sort_path)
-    DATA_PATH = os.path.join(INSTALL_PATH, "data", robot, "")
+    SORT_PATH = os.path.abspath(sort_path)
+    DATA_PATH = os.path.join(SORT_PATH, "data", "")
     STAGING_PATH = os.path.join(staging_path, "")
-    ARCHIVE_PATH = os.path.join(INSTALL_PATH, "data", "unsorted_unlabeled_processed", "")
+    ARCHIVE_PATH = os.path.join(DATA_PATH, "unsorted_unlabeled_processed", "")
     UNSORTED_UNLABELED_PATH = os.path.join(DATA_PATH, "master_data", "unsorted_unlabeled", "")
     SORTED_UNLABELED_PATH = os.path.join(DATA_PATH, "master_data", "sorted_unlabeled", "")
     CURRENT_EXP_PATH = os.path.join(DATA_PATH, "master_data", "current_exp", "")
@@ -371,7 +371,9 @@ def clear_junk():
                 shutil.rmtree(remerge_path + data)
             continue
         shutil.rmtree(junk_review_path + file)
-            
+
+def clear_staging_area(images_to_archive_path):
+    shutil.move(source_path, destination_path)
 
 def sort_date(elem):
     """
