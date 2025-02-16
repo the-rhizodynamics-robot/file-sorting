@@ -373,7 +373,8 @@ def clear_junk():
         shutil.rmtree(junk_review_path + file)
 
 def clear_staging_area(images_to_archive_path):
-    shutil.move(source_path, destination_path)
+    destination_path = os.path.join(ARCHIVE_PATH, os.path.basename(images_to_archive_path))
+    shutil.move(images_to_archive_path, destination_path)
 
 def sort_date(elem):
     """
