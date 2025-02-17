@@ -19,7 +19,7 @@ process file_sorting {
     """
     robot_image_sorting.py \
         --images_path ${images_path} \
-        --sort_path ${sort_path} \
+        --destination_path ${sort_path} \
         --model_path ${model_path} \
         --boxes_per_shelf ${params.boxes_per_shelf} \
         ${params.finish_only ? '--transfer' : ''} \
@@ -32,3 +32,23 @@ workflow {
     file_sorting(path_ch)
 }
 
+workflow.onComplete {
+    def source = file(params.images_path)
+    def destination = file("${params.sort_path}/data/unsorted_unlabeled/${source.name}")
+
+    if (source.exists()) {
+        if (source.isDirectory()) {
+            println "Moving directory ${source} to ${destination}"
+            destination.mkdirs()
+            source.eachFile { file ->
+                file.moveTo(destination.resolve(file.name))
+            }
+        } else {
+            println "Moving file ${source} to ${destination}"
+            destination.parentFile.mkdirs()
+            source.moveTo(destination)
+        }
+    } else {
+        println "Source path ${source} does not exist."
+    }
+}

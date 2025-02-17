@@ -50,8 +50,8 @@ def init(boxes_per_shelf, sort_path, staging_path, model_path):
     FINISHED_EXP_PATH = os.path.join(DATA_PATH, "master_data", "finished_exp", "")
     JUNK_EXP_PATH = os.path.join(DATA_PATH, "master_data", "junk_exp", "")
     JUNK_REVIEW_PATH = os.path.join(DATA_PATH, "master_data", "junk_review", "")
-    FINAL_VIDEO_PATH = os.path.join(INSTALL_PATH, "data", "videos", "unstabilized", "")
-    STABILIZED_VIDEO_PATH = os.path.join(INSTALL_PATH, "data", "videos", "stabilized", "")
+    FINAL_VIDEO_PATH = os.path.join(DATA_PATH, "videos", "unstabilized", "")
+    STABILIZED_VIDEO_PATH = os.path.join(DATA_PATH, "videos", "stabilized", "")
     BOXES_PER_SHELF = int(boxes_per_shelf)
     
 

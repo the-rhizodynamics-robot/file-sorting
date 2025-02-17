@@ -52,7 +52,7 @@ sort_path = args.sort_path
 boxes_per_shelf = args.boxes_per_shelf
 model_path = args.model_path
 
-sf.init(boxes_per_shelf, sort_path, staging_path, model_path)
+sf.init(boxes_per_shelf, sort_path, images_path, model_path)
 
 # Ensure directory structure exists
 directories = [
@@ -100,7 +100,7 @@ else:
     sf.sort(run_name, run_name[-1:])
     sf.label(run_name)    
 
-    sf.clear_staging_area(data_path)  
+    # sf.clear_staging_area(data_path)  
 
     review_needed = sf.junk_review()
 
