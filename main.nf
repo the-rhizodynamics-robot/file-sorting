@@ -2,7 +2,6 @@
 
 params.images_path = ""
 params.sort_path = ""
-params.archive_path = ""
 params.model_path = "/mnt/c/Users/iwt/Desktop/sorting_files/"
 params.boxes_per_shelf = 3
 params.finish_only = false
@@ -24,7 +23,7 @@ process file_sorting {
         --model_path ${model_path} \
         --boxes_per_shelf ${params.boxes_per_shelf} \
         ${params.finish_only ? '--transfer' : ''} \
-        ${params.do_not_stabilize ? '--stabilize' : ''} \
+        ${params.stabilize ? '--stabilize' : ''} \
         ${params.unzip ? '--unzip' : ''}
     """
 }
@@ -33,26 +32,3 @@ workflow {
     file_sorting(path_ch)
 }
 
-workflow.onComplete {
-    if (params.images_path && params.archive_path) {
-        def source = file(params.images_path)
-        def destination = file(params.archive_path)
-        if (source.exists()) {
-            if (source.isDirectory()) {
-                println "Moving directory ${source} to ${destination}"
-                destination.mkdirs()
-                source.eachFile { file ->
-                    file.moveTo(destination.resolve(file.name))
-                }
-            } else {
-                println "Moving file ${source} to ${destination}"
-                destination.parentFile.mkdirs()
-                source.moveTo(destination)
-            }
-        } else {
-            println "Source path ${source} does not exist."
-        }
-    } else {
-        println "Either images_path or archive_path is not set."
-    }
-}
