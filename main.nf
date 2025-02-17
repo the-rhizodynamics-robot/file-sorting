@@ -7,6 +7,7 @@ params.boxes_per_shelf = 3
 params.finish_only = false
 params.stabilize = true
 params.unzip = true
+params.archive = true
 
 path_ch = Channel.of([params.images_path, params.sort_path, params.model_path])
 
@@ -24,7 +25,7 @@ process file_sorting {
         --boxes_per_shelf ${params.boxes_per_shelf} \
         ${params.finish_only ? '--transfer' : ''} \
         ${params.stabilize ? '--stabilize' : ''} \
-        ${params.unzip ? '--unzip' : ''}
+        ${params.unzip ? '--unzip' : ''} 
     """
 }
 
@@ -33,7 +34,7 @@ workflow {
 }
 
 workflow.onComplete { 
-    if (workflow.success) {
+    if (workflow.success && params.archive) {
         def source = file(params.images_path)
         def destination = file("${params.sort_path}/data/unsorted_unlabeled_processed/${source.name}")
 

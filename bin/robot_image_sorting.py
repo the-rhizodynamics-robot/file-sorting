@@ -95,7 +95,6 @@ else:
 
     current_exp_list = sf.update(current_exp_list)
     run_name = os.path.splitext(images_path)[0]
-    print(run_name)
     sf.sort(run_name, run_name[-1:])
     sf.label(run_name)    
 
