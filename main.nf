@@ -14,7 +14,7 @@ process file_sorting {
     container 'ghcr.io/the-rhizodynamics-robot/file-sorting-env:latest'
 
     input:
-    tuple path(images_path), path(staging_path), path(model_path)
+    tuple path(images_path), path(sort_path), path(model_path)
     script:
     """
     robot_image_sorting.py \
