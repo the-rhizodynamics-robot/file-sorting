@@ -22,7 +22,7 @@ parser.add_argument("-i", "--images_path",
                     dest="images_path",
                     help="Path to images to be sorted (zip or directory)",
                     required=True)
-parser.add_argument("-s", "--sort_path",
+parser.add_argument("-d", "--destination_path",
                     action="store",
                     dest="sort_path",
                     help="Base directory for file sorting project",
@@ -38,7 +38,7 @@ parser.add_argument("-b", "--boxes_per_shelf",
 parser.add_argument("-f", "--finish_only",
                     help="Transfer all experiments to finished/ and create videos",
                     action="store_true")
-parser.add_argument("-b", "--stabilize",
+parser.add_argument("-s", "--stabilize",
                     help="Do not stabilize videos",
                     action="store_true")
 parser.add_argument("-u", "--unzip",
