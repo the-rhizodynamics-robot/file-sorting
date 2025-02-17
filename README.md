@@ -18,6 +18,8 @@ Next steps:
 
 -rethink global variables (or at least reduce to minimum)
 
+-implement optional zipped processing
+
 FEATURES:
 
 -work on the rotation thing.

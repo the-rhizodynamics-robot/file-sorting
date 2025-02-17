@@ -380,22 +380,24 @@ def sort_date(elem):
     return summation
 
 
-def transfer_to_processing(run_name):
+def transfer_to_processing(images_path, unzip):
     """
         Function to unzip experimental runs from the staging area.
         It will make a directory in the unsorted_unlabelled directory in
         master data (if it isn't there already)
     """
-    directory = (os.path.splitext(run_name)[0])
-    print(directory)
-    try:
-        os.makedirs(UNSORTED_UNLABELED_PATH + directory, exist_ok=True)
-    except Exception as e:
-        print("file exists")
-        print(e)
-    with zipfile.ZipFile(STAGING_PATH + run_name,"r") as zip_ref:
-        zip_ref.extractall(UNSORTED_UNLABELED_PATH + directory)
-    os.chdir("/home")
+    if unzip:
+        run_name = os.path.splitext(os.path.basename(images_path))[0]
+        try:
+            os.makedirs(UNSORTED_UNLABELED_PATH + run_name, exist_ok=True)
+        except Exception as e:
+            print("file exists")
+            print(e)
+        with zipfile.ZipFile(images_path, "r") as zip_ref:
+            zip_ref.extractall(UNSORTED_UNLABELED_PATH + run_name)
+        os.chdir("/home")
+    else:
+        shutil.move(images_path, UNSORTED_UNLABELED_PATH + os.path.basename(images_path))
 
 
 def listdir_nohidden(path):

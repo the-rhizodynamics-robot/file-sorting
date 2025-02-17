@@ -46,7 +46,7 @@ workflow.onComplete {
                 }
             } else {
                 println "Moving file ${source} to ${destination}"
-                destination.parentFile.mkdirs()
+                destination.parent.mkdirs()
                 source.moveTo(destination)
             }
         } else {

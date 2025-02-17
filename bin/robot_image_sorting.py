@@ -91,7 +91,7 @@ if args.finish_only:
 else:
     #data_path = images_path # data_path_list[0]
     # unzip and move images to unsorted_unlabeled
-    sf.transfer_to_processing(images_path)
+    sf.transfer_to_processing(images_path, args.unzip)
 
     current_exp_list = sf.update(current_exp_list)
     run_name = os.path.splitext(images_path)[0]
