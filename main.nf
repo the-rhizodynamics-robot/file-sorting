@@ -23,7 +23,7 @@ process file_sorting {
         --destination_path ${sort_path} \
         --model_path ${model_path} \
         --boxes_per_shelf ${params.boxes_per_shelf} \
-        ${params.finish_only ? '--transfer' : ''} \
+        ${params.finish_only ? '--finish_only' : ''} \
         ${params.stabilize ? '--stabilize' : ''} \
         ${params.unzip ? '--unzip' : ''} 
     """
