@@ -19,7 +19,7 @@ process file_sorting {
     """
     robot_image_sorting.py \
         --images_path ${images_path} \
-        --sort_path ${ssort_path} \
+        --sort_path ${sort_path} \
         --model_path ${model_path} \
         --boxes_per_shelf ${params.boxes_per_shelf} \
         ${params.finish_only ? '--transfer' : ''} \
