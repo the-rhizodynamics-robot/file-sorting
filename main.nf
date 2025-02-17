@@ -54,6 +54,6 @@ workflow.onComplete {
             println "Source path ${source} does not exist."
         }
     } else {
-        println "Workflow did not complete successfully. Skipping file/directory move."
+        println "Skipping file/directory archive step."
     }
 }
