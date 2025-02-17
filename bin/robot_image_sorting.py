@@ -86,7 +86,7 @@ data_path_list = sf.listdir_nohidden(sf.STAGING_PATH)
 data_path_list.sort(key=sf.sort_date)
 print(data_path_list)
 
-if args.transfer:
+if args.finish_only:
     current_exp_list = sf.update(current_exp_list)
     sf.final_transfer(current_exp_list)
 else:
@@ -99,6 +99,8 @@ else:
     print(run_name)
     sf.sort(run_name, run_name[-1:])
     sf.label(run_name)    
+
+    sf.clear_staging_area(data_path)  
 
     review_needed = sf.junk_review()
 

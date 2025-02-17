@@ -16,6 +16,8 @@ Next steps:
 
 -Need to re-implement archive function call.
 
+-rethink global variables (or at least reduce to minimum)
+
 FEATURES:
 
 -work on the rotation thing.

@@ -317,13 +317,6 @@ def final_transfer(current_exp_list, stabilize = True):
                     print(e)
                 except Exception as e:
                     print(e)
-                
-                # # remove qrbox.png and put in showcase folder
-                # if not os.path.isdir(FINAL_SHOWCASE_PATH + current_exp_name):
-                #     os.mkdir(FINAL_SHOWCASE_PATH + current_exp_name)
-                # if os.path.exists(FINISHED_EXP_PATH + current_exp_name + "/qrbox.png"):
-                #     shutil.copy(FINISHED_EXP_PATH + current_exp_name + "/qrbox.png", FINAL_SHOWCASE_PATH + current_exp_name)
-                #     os.remove(FINISHED_EXP_PATH + current_exp_name + "/qrbox.png")
 
                 # make video and move it
                 src = FINISHED_EXP_PATH + current_exp_list[x][0] + "/"
