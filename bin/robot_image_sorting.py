@@ -56,7 +56,6 @@ sf.init(boxes_per_shelf, sort_path, images_path, model_path)
 
 # Ensure directory structure exists
 directories = [
-    "data/unsorted_unlabeled_zipped",
     "data/unsorted_unlabeled_processed",
     "data/master_data/unsorted_unlabeled",
     "data/master_data/sorted_unlabeled",
@@ -79,28 +78,28 @@ sf.re_merge()
 sf.clear_junk()
 
 current_exp_list = []
-data_path_list = sf.listdir_nohidden(sf.STAGING_PATH)
+# data_path_list = sf.listdir_nohidden(sf.STAGING_PATH)
 
 # sort in ascending order by value
 # in order to create a value representative of the date the sort_date function is used
-data_path_list.sort(key=sf.sort_date)
-print(data_path_list)
+# data_path_list.sort(key=sf.sort_date)
+# print(data_path_list)
 
 if args.finish_only:
     current_exp_list = sf.update(current_exp_list)
     sf.final_transfer(current_exp_list)
 else:
-    data_path = data_path_list[0]
+    #data_path = images_path # data_path_list[0]
     # unzip and move images to unsorted_unlabeled
-    sf.transfer_to_instance(data_path)
+    sf.transfer_to_processing(images_path)
 
     current_exp_list = sf.update(current_exp_list)
-    run_name = os.path.splitext(data_path)[0]
+    run_name = os.path.splitext(images_path)[0]
     print(run_name)
     sf.sort(run_name, run_name[-1:])
     sf.label(run_name)    
 
-    # sf.clear_staging_area(data_path)  
+    # sf.clear_staging_area(images_path)  
 
     review_needed = sf.junk_review()
 

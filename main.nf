@@ -32,23 +32,27 @@ workflow {
     file_sorting(path_ch)
 }
 
-workflow.onComplete {
-    def source = file(params.images_path)
-    def destination = file("${params.sort_path}/data/unsorted_unlabeled/${source.name}")
+workflow.onComplete { 
+    if (workflow.success) {
+        def source = file(params.images_path)
+        def destination = file("${params.sort_path}/data/unsorted_unlabeled_processed/${source.name}")
 
-    if (source.exists()) {
-        if (source.isDirectory()) {
-            println "Moving directory ${source} to ${destination}"
-            destination.mkdirs()
-            source.eachFile { file ->
-                file.moveTo(destination.resolve(file.name))
+        if (source.exists()) {
+            if (source.isDirectory()) {
+                println "Moving directory ${source} to ${destination}"
+                destination.mkdirs()
+                source.eachFile { file ->
+                    file.moveTo(destination.resolve(file.name))
+                }
+            } else {
+                println "Moving file ${source} to ${destination}"
+                destination.parentFile.mkdirs()
+                source.moveTo(destination)
             }
         } else {
-            println "Moving file ${source} to ${destination}"
-            destination.parentFile.mkdirs()
-            source.moveTo(destination)
+            println "Source path ${source} does not exist."
         }
     } else {
-        println "Source path ${source} does not exist."
+        println "Workflow did not complete successfully. Skipping file/directory move."
     }
 }

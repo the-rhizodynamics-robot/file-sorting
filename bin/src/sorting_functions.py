@@ -380,7 +380,7 @@ def sort_date(elem):
     return summation
 
 
-def transfer_to_instance(run_name):
+def transfer_to_processing(run_name):
     """
         Function to unzip experimental runs from the staging area.
         It will make a directory in the unsorted_unlabelled directory in
