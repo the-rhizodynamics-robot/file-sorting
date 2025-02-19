@@ -397,7 +397,8 @@ def transfer_to_processing(images_path, unzip):
             zip_ref.extractall(UNSORTED_UNLABELED_PATH + run_name)
         os.chdir("/home")
     else:
-        shutil.move(images_path, UNSORTED_UNLABELED_PATH + os.path.basename(images_path))
+        destination_path = os.path.join(UNSORTED_UNLABELED_PATH, os.path.basename(images_path))
+        shutil.copytree(images_path, destination_path)
 
 
 def listdir_nohidden(path):

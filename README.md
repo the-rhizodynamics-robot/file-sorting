@@ -1,11 +1,6 @@
--images stored on computer-images sorted on computer or vm-images are sorted, movie made, and stabilized.
+-images stored on computer: images sorted on computer or vm-images are sorted, movie made, and stabilized.
 
 -external process to zip, transfer, and unzip
-
-sort, check if folder in in_progress exists.   
-  -if so, add to it   
-  -if not, make video, stabilize, and clean up (zip images)
-
 
 Next steps:
 -Parameterize NF script. CHECK (almost certainly wrong, but need data from next step to test)
@@ -25,3 +20,23 @@ FEATURES:
 -work on the rotation thing.
 
 -add onComplete hook to (on success) clear staging_area.
+
+////////////////////////
+/// SORTING/BOX CLASS //
+////////////////////////
+
+-It appears the box class is not used in the file sorting.
+
+Plan:
+
+-remove box class code
+
+-Create a second repo for tip tracking.
+
+-Has to be interactive: need to containerize jupyerlab? Seems complex, need to render notebook in host 
+
+"is it possible to containerize jupyterlab and have it run on a host machine? As in, access it from a web browser?"
+
+The answer appears to be yes.
+
+https://github.com/isaiahwtaylor/groot-sorting-tracking/tree/master/code
