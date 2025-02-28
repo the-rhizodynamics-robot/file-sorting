@@ -1,37 +1,6 @@
-# Use an official Python image as the base
-FROM python:3.7-slim
-
-# Set environment variables to avoid interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    python3-opencv \
-    libzbar0 \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install FFmpeg (static build)
-RUN wget https://www.johnvansickle.com/ffmpeg/old-releases/ffmpeg-4.2.2-amd64-static.tar.xz && \
-    tar xvf ffmpeg-4.2.2-amd64-static.tar.xz && \
-    mv ffmpeg-4.2.2-amd64-static/ffmpeg /usr/local/bin/ && \
-    rm -r ffmpeg-4.2.2-amd64-static*
-
-# Copy requirements file
-COPY requirements.txt /app/requirements.txt
-WORKDIR /app
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Keras RetinaNet separately (it has specific requirements)
-RUN pip install keras-retinanet==0.5.1 --no-cache-dir
-
+# Use functional image already on ghcr
+FROM ghcr.io/the-rhizodynamics-robot/file-sorting-env@sha256:b304899a4368f116117f4233840c226e0fc239983b219b8f135981090e9b6767
 # Download model files from Hugging Face
-RUN mkdir -p /app/models
+RUN mkdir -p /app/models 
 RUN wget -O /app/models/SeedInference.h5 https://huggingface.co/iwtwb8/root_robot_models/resolve/main/SeedInference.h5 && \
     wget -O /app/models/qrInference.h5 https://huggingface.co/iwtwb8/root_robot_models/resolve/main/qrInference.h5
-
-# Set the container's entrypoint
-CMD ["/bin/bash"]

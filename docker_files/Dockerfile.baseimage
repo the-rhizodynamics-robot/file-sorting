@@ -1,0 +1,32 @@
+# Use an official Python image as the base
+FROM python:3.7-slim
+
+# Set environment variables to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3-opencv \
+    libzbar0 \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install FFmpeg (static build)
+RUN wget https://www.johnvansickle.com/ffmpeg/old-releases/ffmpeg-4.2.2-amd64-static.tar.xz && \
+    tar xvf ffmpeg-4.2.2-amd64-static.tar.xz && \
+    mv ffmpeg-4.2.2-amd64-static/ffmpeg /usr/local/bin/ && \
+    rm -r ffmpeg-4.2.2-amd64-static*
+
+# Copy requirements file
+COPY requirements.txt /app/requirements.txt
+WORKDIR /app
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Keras RetinaNet separately (it has specific requirements)
+RUN pip install keras-retinanet==0.5.1 --no-cache-dir
+
+# Set the container's entrypoint
+CMD ["/bin/bash"]
