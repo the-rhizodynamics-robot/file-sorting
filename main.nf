@@ -8,19 +8,19 @@ params.stabilize = true
 params.unzip = true
 params.archive = true
 
-path_ch = Channel.of([params.images_path, params.sort_path, params.model_path])
+path_ch = Channel.of([params.images_path, params.sort_path])
 
 process file_sorting {
     container 'ghcr.io/the-rhizodynamics-robot/file-sorting-env:latest'
 
     input:
-    tuple path(images_path), path(sort_path), path(model_path)
+    tuple path(images_path), path(sort_path)
     script:
     """
     robot_image_sorting.py \
         --images_path ${images_path} \
         --destination_path ${sort_path} \
-        --model_path /app/models/qrInference.h5 \
+        --model_path /app/models/ \
         --boxes_per_shelf ${params.boxes_per_shelf} \
         ${params.finish_only ? '--finish_only' : ''} \
         ${params.stabilize ? '--stabilize' : ''} \
