@@ -29,11 +29,14 @@ FEATURES:
 
 Plan:
 
--remove box class code
+-remove box class code. CHECK
 
--Create a second repo for tip tracking.
+-Create a second repo for tip tracking. CHECK
 
--Has to be interactive: need to containerize jupyerlab? Seems complex, need to render notebook in host 
+///////////////////////
+////// NEXT STEP //////
+///////////////////////
+-Has to be interactive: need to containerize jupyerlab? Seems complex, need to render notebook in host.
 
 "is it possible to containerize jupyterlab and have it run on a host machine? As in, access it from a web browser?"
 

@@ -14,7 +14,7 @@ import os
 import sys
 
 # Dynamically add `bin/src/` to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
+#sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
 parser = argparse.ArgumentParser(description="Script for sorting images and creating videos.")
 parser.add_argument("-i", "--images_path",

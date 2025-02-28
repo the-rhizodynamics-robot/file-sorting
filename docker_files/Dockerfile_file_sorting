@@ -28,5 +28,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install Keras RetinaNet separately (it has specific requirements)
 RUN pip install keras-retinanet==0.5.1 --no-cache-dir
 
+# Download model files from Hugging Face
+RUN mkdir -p /app/models
+RUN wget -O /app/models/SeedInference.h5 https://huggingface.co/iwtwb8/root_robot_models/resolve/main/SeedInference.h5 && \
+    wget -O /app/models/qrInference.h5 https://huggingface.co/iwtwb8/root_robot_models/resolve/main/qrInference.h5
+
 # Set the container's entrypoint
 CMD ["/bin/bash"]
