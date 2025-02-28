@@ -2,7 +2,6 @@
 
 params.images_path = ""
 params.sort_path = ""
-params.model_path = "/mnt/c/Users/iwt/Desktop/sorting_files/"
 params.boxes_per_shelf = 3
 params.finish_only = false
 params.stabilize = true
@@ -21,7 +20,7 @@ process file_sorting {
     robot_image_sorting.py \
         --images_path ${images_path} \
         --destination_path ${sort_path} \
-        --model_path ${model_path} \
+        --model_path /app/models/qrInference.h5 \
         --boxes_per_shelf ${params.boxes_per_shelf} \
         ${params.finish_only ? '--finish_only' : ''} \
         ${params.stabilize ? '--stabilize' : ''} \
