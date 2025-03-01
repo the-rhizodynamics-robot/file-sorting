@@ -47,3 +47,82 @@ https://github.com/isaiahwtaylor/groot-sorting-tracking/tree/master/code
 /////////////////
 //// Testing ////
 /////////////////
+
+nextflow run /home/iwtwb8/gitrepos/file-sorting/main.nf -profile local --images_path /mnt/c/Users/iwt/Desktop/sorting_files/zips/7_7_unzip_1/ --unzip false --sort_path /mnt/c/Users/iwt/Desktop/file_sorting_test/ --archive false
+
+# to do
+write readme
+optimize code
+
+# Actual readme
+
+# file-sorting
+
+This is a nextflow pipeline for taking still images generated with the [GROOT robot] (https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0295823) and creating stabilized, time-lapse videos. 
+
+## Dependancies
+
+Nextflow
+
+Docker
+
+## Usage
+
+## Example Usage
+
+To run the Nextflow pipeline, use the following command:
+
+```
+nextflow run /path/to/main.nf -profile local \
+  --images_path /path/to/images_directory \
+  --sort_path /path/to/sorted_images_directory \
+  --boxes_per_shelf <number_of_boxes_per_shelf> \
+  --finish_only <true_or_false> \
+  --stabilize <true_or_false> \
+  --unzip <true_or_false> \
+  --archive <true_or_false>
+```
+
+Input Parameters
+
+--images_path: The path to the directory containing the images to be processed. This parameter is required.
+
+Example: --images_path /path/to/images
+
+--sort_path: The path to the directory where the sorted images and results will be saved. This parameter is required.
+
+Example: --sort_path /path/to/
+
+--boxes_per_shelf: The number of boxes per shelf. This parameter is optional and defaults to 3.
+
+Example: --boxes_per_shelf 4
+
+--finish_only: A boolean flag to indicate whether to only finish the sorting process. This parameter is optional and defaults to false.
+
+Example: --finish_only
+
+--stabilize: A boolean flag to indicate whether to stabilize the images. This parameter is optional and defaults to true.
+
+Example: --stabilize 
+
+--unzip: A boolean flag to indicate whether the input files are zipped. This parameter is optional and defaults to true.
+
+Example: --unzip false
+
+--archive: A boolean flag to indicate whether to archive the processed files. This parameter is optional and defaults to true.
+
+Example: --archive false
+
+
+nextflow run /home/iwtwb8/gitrepos/file-sorting/main.nf -profile local \
+  --images_path /mnt/c/Users/iwt/Desktop/sorting_files/zips/7_7_unzip_1/ \
+  --sort_path /mnt/c/Users/iwt/Desktop/file_sorting_test/ \
+  --boxes_per_shelf 4 \
+  --finish_only false \
+  --stabilize true \
+  --unzip false \
+  --archive false
+
+## Example Usage
+
+nextflow run /home/iwtwb8/gitrepos/file-sorting/main.nf -profile local --images_path /mnt/c/Users/iwt/Desktop/sorting_files/zips/7_7_unzip_1/ --unzip false --sort_path /mnt/c/Users/iwt/Desktop/file_sorting_test/ --archive false
