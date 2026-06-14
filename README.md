@@ -89,20 +89,25 @@ CE is free and talks to Nextflow identically.
    ```powershell
    wsl --install -d Ubuntu
    ```
-   If virtualization is disabled in firmware, enable it (VT-x / AMD-V) — on a managed
-   machine this is an IT request. After the reboot, Ubuntu finishes first-time setup.
+   WSL2 requires hardware virtualization to be **enabled in firmware** (BIOS/UEFI). If
+   `wsl --install` fails with `HCS_E_HYPERV_NOT_INSTALLED` / "virtualization is not
+   enabled," see [Troubleshooting](#troubleshooting-windows--wsl2) — on the test
+   machine this required a BIOS toggle **and a full power-off**. On a managed machine
+   the BIOS change is typically an IT request.
 
 2. **Inside Ubuntu — install Docker CE** and enable systemd so the daemon autostarts:
    ```bash
    curl -fsSL https://get.docker.com | sh
    sudo usermod -aG docker "$USER"
    ```
-   Add the following to `/etc/wsl.conf`:
+   Recent Ubuntu WSL images already run **systemd**, so the Docker daemon is enabled
+   and started automatically. If `systemctl is-active docker` doesn't return `active`,
+   ensure `/etc/wsl.conf` contains:
    ```ini
    [boot]
    systemd=true
    ```
-   then, from Windows, run `wsl --shutdown` once and reopen Ubuntu.
+   then run `wsl --shutdown` from Windows once and reopen Ubuntu.
 
 3. **Inside Ubuntu — install Java + Nextflow:**
    ```bash
@@ -117,6 +122,25 @@ CE is free and talks to Nextflow identically.
 > **Keep the host alive during a run.** As with the capture PC, the machine running the
 > pipeline should not sleep or auto-reboot mid-run. See robot-control's README for the
 > sleep / Windows-Update settings.
+
+### Troubleshooting (Windows / WSL2)
+
+- **`wsl --install` fails with `HCS_E_HYPERV_NOT_INSTALLED` / "virtualization is not
+  enabled on this machine."** Virtualization is off in firmware. Reboot into BIOS/UEFI
+  and enable it. On the Lenovo ThinkCentre test machine the relevant option was labeled
+  **Intel VT-d** (under *Security → Virtualization*); enable that **and** *Intel
+  Virtualization Technology* if both are present.
+- **It still reads disabled after enabling it in BIOS.** A warm restart may not apply the
+  change — do a **full power-off** (shut down completely, then power back on), not just a
+  restart. On the test machine, only a cold boot made it take effect. Disabling Windows
+  "Fast Startup" first makes the shutdown a true cold boot.
+- **`Get-WindowsOptionalFeature` / `VirtualizationFirmwareEnabled` says `False` even when
+  it's working.** That WMI field is unreliable once a hypervisor is running. Trust the
+  functional test instead: `wsl --install -d Ubuntu` succeeding, and `docker run
+  hello-world` working inside the distro.
+- **The Windows hypervisor can start a bit late after boot.** Immediately after a cold
+  boot, a WSL VM launch may briefly fail before the hypervisor is up; retrying after a
+  short wait (no reboot needed) succeeds.
 
 ---
 
@@ -212,5 +236,8 @@ This pipeline is part of the Rhizodynamics Robot. If you use it, please cite:
 
 ## Status
 
-This README is a first pass. The Windows/WSL2 setup is being validated end-to-end on a
-test machine; steps may be refined as we confirm them.
+First pass. The WSL2 + Docker CE + Nextflow setup has been validated on a Windows 10
+test machine (Lenovo ThinkCentre): `wsl --install -d Ubuntu`, Docker CE under systemd,
+and `docker run hello-world` all confirmed working. Still to validate end-to-end: a full
+pipeline run against a real image set (pulling the `file-sorting-env` container and
+producing stabilized videos).
