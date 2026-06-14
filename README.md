@@ -44,11 +44,23 @@ Outputs land under your `--sort_path` in a fixed directory layout (see
 
 ## Requirements
 
-- **Nextflow** (needs Java 11+).
+- **Nextflow** (needs Java 11+). **Pin to `24.10.x`** — see the version note below.
 - **A Docker engine** that can run `linux/amd64` images.
 
 That's it on the host. Nextflow pulls
 `ghcr.io/the-rhizodynamics-robot/file-sorting-env:latest` on first run.
+
+> ⚠️ **Nextflow version — pin to `24.10.x`.** Nextflow **25.x+** makes its strict
+> "Nextflow language" parser the default, and that parser rejects the top-level
+> statements in `main.nf` (the `Channel.of(...)` channel definition and the
+> `workflow.onComplete { … }` hook) with
+> `Statements cannot be mixed with script declarations`. The code is still valid
+> DSL2 — only the **parser** changed — so the fix is to pin the version, not rewrite
+> the pipeline. Prefix any run with `NXF_VER=24.10.0`:
+> ```bash
+> NXF_VER=24.10.0 nextflow run …
+> ```
+> Modernizing `main.nf` for the strict parser is on the [Roadmap](#roadmap).
 
 > **Note on platforms.** Nextflow is a POSIX/Linux tool — it does **not** run on
 > native Windows (PowerShell/CMD/Git Bash). On Windows it runs inside **WSL2**, which
@@ -147,24 +159,74 @@ CE is free and talks to Nextflow identically.
 ## Usage
 
 ```bash
-nextflow run main.nf -profile local \
+NXF_VER=24.10.0 nextflow run main.nf -profile local \
   --images_path /path/to/run_images_or_zip \
   --sort_path   /path/to/project_dir \
   --boxes_per_shelf 3
 ```
 
-Windows / WSL2 example:
+### Run straight from GitHub (recommended, especially on Windows)
+
+Instead of a local clone you can point Nextflow at the repo and let it pull `main`:
 
 ```bash
-nextflow run main.nf -profile local \
+NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
   --images_path /mnt/c/Users/you/Desktop/run_7_7 \
-  --sort_path   /mnt/c/Users/you/Desktop/sorting_project \
+  --sort_path   /home/you/sorting_project \
   --boxes_per_shelf 3 \
   --unzip false \
   --archive false
 ```
 
+This is the **preferred way on Windows/WSL2**. Nextflow clones the repo on the Linux
+side (into `~/.nextflow/assets/`), so the `bin/` scripts are checked out with **LF**
+line endings. A clone made on the Windows filesystem instead gets **CRLF** endings (via
+git's `autocrlf`), which turns the container shebang `#!/usr/bin/env python3` into
+`python3\r` and fails the run with:
+
+```
+/usr/bin/env: 'python3\r': No such file or directory
+```
+
+(If you must run from a Windows-side clone, add a `.gitattributes` forcing
+`*.py`/`*.sh` to `eol=lf`, or strip CRs from `bin/` before running.)
+
+> **`--sort_path` must be an existing, absolute directory.** It's staged as a Nextflow
+> `path()` input, so a relative path is rejected (`Not a valid path value: './…'`).
+> Create it first: `mkdir -p /home/you/sorting_project`.
+
 Nextflow's `-resume` flag re-uses cached work if a run is interrupted.
+
+### Producing videos: the two-phase workflow
+
+Sorting a run does **not** by itself produce a video. The pipeline only renders a video
+once an experiment is considered **finished**, and it detects "finished" as *a run that
+adds **no new images** to an already-existing experiment* (i.e. the robot has stopped
+imaging it). So a brand-new experiment created by its first sorting run has no video yet
+— that's expected, not a failure.
+
+To finalize one or more batches and render their videos, run a second pass with
+**`--finish_only true`** against the **same `--sort_path`**:
+
+```bash
+# 1) Sort a run (creates / grows experiments under current_exp/)
+NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
+  --images_path /mnt/c/Users/you/Desktop/run_7_7 \
+  --sort_path   /home/you/sorting_project \
+  --boxes_per_shelf 3 --unzip false --archive false
+
+# 2) Finish: move current_exp/ -> finished_exp/ and render the (stabilized) videos
+NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
+  --images_path /mnt/c/Users/you/Desktop/run_7_7 \
+  --sort_path   /home/you/sorting_project \
+  --boxes_per_shelf 3 --finish_only true --unzip false --archive false
+```
+
+`--finish_only` skips ingest/sort and just finalizes whatever sits in `current_exp/`,
+writing `<exp>.mp4` to both `data/videos/unstabilized/` and (by default)
+`data/videos/stabilized/`. In normal operation across many robot runs this happens on
+its own — an experiment finishes the first run after imaging stops — and `--finish_only`
+is the manual way to force it for a one-off batch.
 
 ### Parameters
 
@@ -263,6 +325,34 @@ the data, the ≥10-shelf bug disappears, and the per-experiment variable-shelf 
 unlocked. This spans both repos: capture writes the manifest (robot-control), processing
 consumes it (file-sorting).
 
+### Generalize image ingestion (don't assume FlyCap filenames)
+
+The sorter currently hard-codes the legacy **FlyCap** naming scheme — it expects files
+like `fc2_save_…-0000.png` and parses the frame index from the `-####` suffix
+(`sorting_functions.py`). FlyCap is old software; newer capture tools (e.g. FLIR
+Spinnaker / SpinView, or any replacement camera software) almost certainly use a
+different prefix and numbering format, which would break ingestion.
+
+Make image ingestion **capture-software-agnostic**:
+- Don't filter or order by a hard-coded prefix. Discover images by **extension**
+  (`.png/.jpg/…`) and derive ordering from a robust source — a configurable filename
+  pattern, EXIF/file mtime, or an explicit index — rather than assuming `-####`.
+- Allow the expected filename pattern to be supplied (param or the run-config manifest
+  above), defaulting to the FlyCap pattern for backward compatibility.
+- This pairs naturally with the manifest work: the capture software and its filename
+  convention can be recorded at capture time and honored at processing time.
+
+### Modernize `main.nf` for the Nextflow strict parser
+
+Runs are currently pinned to `24.10.x` because Nextflow 25.x+ defaults to the strict
+"Nextflow language" parser, which rejects `main.nf`'s top-level `Channel.of(...)`
+definition and `workflow.onComplete { … }` hook (see the [version note](#requirements)).
+The code is valid DSL2 — only the parser changed — so the long-term fix is to bring the
+syntax up to what the strict parser accepts (move the channel construction inside
+`workflow { }`, and replace/relocate `onComplete` — likely folding the archive step into
+the workflow or an `output`/`publishDir` mechanism). Doing this lets the pipeline run on
+current Nextflow without the `NXF_VER` pin. Until then, pinning is the supported path.
+
 ---
 
 ## Citing
@@ -277,8 +367,10 @@ This pipeline is part of the Rhizodynamics Robot. If you use it, please cite:
 
 ## Status
 
-First pass. The WSL2 + Docker CE + Nextflow setup has been validated on a Windows 10
-test machine (Lenovo ThinkCentre): `wsl --install -d Ubuntu`, Docker CE under systemd,
-and `docker run hello-world` all confirmed working. Still to validate end-to-end: a full
-pipeline run against a real image set (pulling the `file-sorting-env` container and
-producing stabilized videos).
+**Validated end-to-end on Windows 10 (WSL2 + Docker CE).** On a Lenovo ThinkCentre test
+machine the full path is confirmed working: `wsl --install -d Ubuntu`, Docker CE under
+systemd, and a complete pipeline run that pulled the `file-sorting-env` container, sorted
+and labeled a real image set, and — via the `--finish_only` pass — produced both
+unstabilized and stabilized `.mp4` videos. The run was launched **from GitHub** under
+**`NXF_VER=24.10.0`**; both choices are load-bearing (LF line endings and the legacy
+parser, respectively, as documented above).
