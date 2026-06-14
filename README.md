@@ -178,6 +178,14 @@ Nextflow's `-resume` flag re-uses cached work if a run is interrupted.
 | `--finish_only` | `false` | Skip ingest/sort; only finalize existing experiments and (re)build videos. |
 | `--archive` | `true` | On success, move the consumed raw run into `data/unsorted_unlabeled_processed/`. |
 
+> ⚠️ **Number of shelves is currently encoded in the input folder name.** There is no
+> `--num_shelves` parameter (yet). The sorter reads the **last character** of the
+> `images_path` name as the shelf count, e.g. `…/20260613_test2` → **2 shelves**. This
+> means the folder name **must end in the shelf-count digit**, and the scheme only works
+> for **1–9 shelves** — a name ending in a non-digit crashes, and ≥10 shelves
+> mis-parses (ends in `0` → divide-by-zero; `11`/`12`/… → reads only the last digit).
+> See [Roadmap](#roadmap) for the planned fix.
+
 ---
 
 ## Output layout
@@ -221,6 +229,39 @@ The directory tree is created automatically on first run.
 Only needed if you change the dependencies or models — for normal runs the published
 image is pulled automatically. Edit the files in `docker_files/` and push to `main`; CI
 builds and pushes a new `:latest` (and a SHA-tagged) image to GHCR.
+
+---
+
+## Roadmap
+
+### Run-config manifest (replace the folder-name shelf encoding)
+
+**Motivation.** The number of shelves is a *per-experiment* choice — an operator with
+only a few samples may image a single shelf and skip the empty ones — so it can't be
+inferred from the rig or reconstructed from memory weeks later. Today it survives only as
+the last character of the input folder name, which is fragile (see the warning above) and
+breaks for ≥10 shelves.
+
+**Plan.** Persist the run configuration *at capture time* and have this pipeline read it:
+
+1. **Capture writes a manifest.** The robot-control host (`robot_host`) already prompts
+   for `num_shelves`, `boxes_per_shelf`, etc. at the handshake, so it knows them at run
+   start. It writes a **visible** `run_config.json` (or `.toml`, to match the host's
+   existing `config.toml`) into the image directory. Visible — not hidden — so it survives
+   the external zip → transfer → unzip step (many tools silently drop dotfiles).
+2. **Pipeline gains optional params.** Add `--num_shelves` (and optionally
+   `--photos_per_shelf`) to `main.nf`, defaulting to null.
+3. **Resolution + precedence**, resolved and logged once in `main.nf`:
+   `explicit param  >  run_config manifest in the run dir  >  fail fast`
+   (a clear error if neither is supplied — never a silent mis-sort).
+4. **Harden the sorter.** Make the image listing filter to known image extensions
+   (`.png/.jpg/…`) instead of "every file in the directory," so the manifest (and any
+   stray file) can sit alongside the images without breaking the FlyCap filename parser.
+
+**Result.** Each run becomes self-describing and reproducible; shelf count is carried by
+the data, the ≥10-shelf bug disappears, and the per-experiment variable-shelf feature is
+unlocked. This spans both repos: capture writes the manifest (robot-control), processing
+consumes it (file-sorting).
 
 ---
 
