@@ -19,7 +19,7 @@ The GROOT system is three repositories:
 |-------|------|------|
 | Capture | [robot-control](https://github.com/the-rhizodynamics-robot/robot-control) | Drives the robot and saves raw images. |
 | **Process** | **file-sorting** *(this repo)* | Sorts images into experiments, labels them, builds stabilized videos. |
-| Track | [groot-sorting-tracking](https://github.com/isaiahwtaylor/groot-sorting-tracking) | Downstream root-tip tracking. |
+| Track | [root-tracking](https://github.com/the-rhizodynamics-robot/root-tracking) | Downstream root-tip tracking. |
 
 ---
 
