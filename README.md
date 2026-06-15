@@ -158,16 +158,10 @@ CE is free and talks to Nextflow identically.
 
 ## Usage
 
-```bash
-NXF_VER=24.10.0 nextflow run main.nf -profile local \
-  --images_path /path/to/run_images_or_zip \
-  --sort_path   /path/to/project_dir \
-  --boxes_per_shelf 3
-```
-
-### Run straight from GitHub (recommended, especially on Windows)
-
-Instead of a local clone you can point Nextflow at the repo and let it pull `main`:
+> ✅ **Strongly recommended: run straight from GitHub — do not clone the repo to run
+> it.** Point Nextflow at the repo and let it pull `main`. This works identically on
+> Linux, macOS, and Windows/WSL2, always runs a known-good revision, and on Windows it
+> sidesteps the CRLF line-ending bug that breaks a local Windows clone (explained below).
 
 ```bash
 NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
@@ -178,9 +172,17 @@ NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profi
   --archive false
 ```
 
-This is the **preferred way on Windows/WSL2**. Nextflow clones the repo on the Linux
-side (into `~/.nextflow/assets/`), so the `bin/` scripts are checked out with **LF**
-line endings. A clone made on the Windows filesystem instead gets **CRLF** endings (via
+That single command pulls the pipeline, pulls the container, and runs it — no clone, no
+build. `-r main` pins the revision (use a tag or commit SHA for full reproducibility);
+`NXF_VER=24.10.0` pins Nextflow to the legacy parser (see [Requirements](#requirements)).
+
+> **`--sort_path` must be an existing, absolute directory.** It's staged as a Nextflow
+> `path()` input, so a relative path is rejected (`Not a valid path value: './…'`).
+> Create it first: `mkdir -p /home/you/sorting_project`.
+
+**Why from GitHub and not a local clone?** Nextflow clones the repo on the **Linux** side
+(into `~/.nextflow/assets/`), so the `bin/` scripts are checked out with **LF** line
+endings. A clone made on the **Windows** filesystem instead gets **CRLF** endings (via
 git's `autocrlf`), which turns the container shebang `#!/usr/bin/env python3` into
 `python3\r` and fails the run with:
 
@@ -188,14 +190,22 @@ git's `autocrlf`), which turns the container shebang `#!/usr/bin/env python3` in
 /usr/bin/env: 'python3\r': No such file or directory
 ```
 
-(If you must run from a Windows-side clone, add a `.gitattributes` forcing
-`*.py`/`*.sh` to `eol=lf`, or strip CRs from `bin/` before running.)
-
-> **`--sort_path` must be an existing, absolute directory.** It's staged as a Nextflow
-> `path()` input, so a relative path is rejected (`Not a valid path value: './…'`).
-> Create it first: `mkdir -p /home/you/sorting_project`.
-
 Nextflow's `-resume` flag re-uses cached work if a run is interrupted.
+
+### Running from a local clone (alternative)
+
+If you do clone the repo, run `main.nf` directly:
+
+```bash
+NXF_VER=24.10.0 nextflow run main.nf -profile local \
+  --images_path /path/to/run_images_or_zip \
+  --sort_path   /path/to/project_dir \
+  --boxes_per_shelf 3
+```
+
+On **Windows**, a local clone needs LF line endings on the `bin/` scripts or it hits the
+`python3\r` error above — add a `.gitattributes` forcing `*.py`/`*.sh` to `eol=lf`, or
+strip CRs from `bin/` before running. Running from GitHub avoids this entirely.
 
 ### Producing videos: the two-phase workflow
 

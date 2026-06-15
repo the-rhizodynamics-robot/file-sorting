@@ -1,37 +1,56 @@
-name: Build and Push Docker Image to GHCR
+name: Build and Push file-sorting image to GHCR
 
 on:
   push:
-    branches:
-      - main 
+    branches: [main]
     paths:
-      - 'docker_files/**' 
+      - 'docker_files/**'
       - '.github/workflows/docker-publish.yml'
+  workflow_dispatch:
 
-  workflow_dispatch:  
+# This workflow builds only the thin model layer (Dockerfile_file_sorting).
+# The base (Dockerfile.baseimage) is frozen on GHCR and rebuilt by hand on
+# purpose -- it pins a static ffmpeg download + an EOL Python 3.7 / keras stack
+# that we do NOT want CI to re-pull (those upstream sources may vanish). To
+# change the base: rebuild it locally, push it, then update the FROM @sha256
+# digest in Dockerfile_file_sorting.
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write  
-
+      packages: write
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get short Git SHA
-        run: echo "GIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to GitHub Container Registry
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Compute tags & labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/file-sorting-env
+          tags: |
+            type=raw,value=latest
+            type=sha
 
-      - name: Build and tag Docker image
-        run: |
-          docker build -t ghcr.io/${{ github.repository_owner }}/file-sorting-env:latest \
-                       -t ghcr.io/${{ github.repository_owner }}/file-sorting-env:${{ env.GIT_SHA }} \
-                       -f docker_files/Dockerfile_file_sorting docker_files/.
-
-      - name: Push to GHCR
-        run: docker push ghcr.io/${{ github.repository_owner }}/file-sorting-env:latest
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker_files
+          file: docker_files/Dockerfile_file_sorting
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
