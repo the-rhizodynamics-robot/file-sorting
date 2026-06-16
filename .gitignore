@@ -1,0 +1,9 @@
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+
+# Nextflow run artifacts (if anyone runs inside the repo)
+.nextflow/
+.nextflow.log*
+work/
