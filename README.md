@@ -135,6 +135,65 @@ CE is free and talks to Nextflow identically.
 > pipeline should not sleep or auto-reboot mid-run. See robot-control's README for the
 > sleep / Windows-Update settings.
 
+### Notes for IT administrators (managed machines)
+
+On a lab-managed or domain-joined Windows machine, some of this needs an administrator and
+some is worth setting as policy.
+
+**One-time privileged setup (admin required).**
+- **Firmware virtualization.** WSL2 needs hardware virtualization (Intel VT-x / AMD-V)
+  enabled in BIOS/UEFI. The toggle is sometimes labeled differently (we hit one labeled
+  *VT-d*), and on some boards it only applies after a **full power-off**, not a warm
+  reboot. See [Troubleshooting](#troubleshooting-windows--wsl2).
+- **Install WSL2 + a pinned Ubuntu LTS** — `wsl --install -d Ubuntu`, or push the distro
+  via Intune / SCCM / Group Policy on a fleet. Keep the WSL kernel current with
+  `wsl --update`.
+
+**Run as a normal user, not root (least privilege).**
+- The pipeline does not need root. Keep the default non-root user and add it to the
+  `docker` group (`sudo usermod -aG docker <user>`); that user then runs `nextflow` and
+  `docker` without `sudo`. Running everything as root (e.g. `wsl -u root`) is a bad habit
+  and also dumps outputs into `/root`, which other users can't read.
+- **Caveat worth flagging:** membership in the `docker` group is effectively
+  **root-equivalent** on that machine — a member can bind-mount the host filesystem into a
+  container and escalate. That's inherent to the classic Docker daemon, not specific to
+  this pipeline. If your security posture forbids that, use **rootless Docker** (the daemon
+  runs as the unprivileged user — no `docker` group, no root daemon). It's more setup but
+  removes the root-equivalent group.
+- With the classic (root) daemon, files the container writes are **owned by root** on the
+  host even when a normal user launched the run. Add `-u $(id -u):$(id -g)` as a container
+  run option if you need outputs owned by the launching user.
+
+**Docker engine: Docker CE, not Docker Desktop.** Docker Desktop requires a paid
+subscription for larger organizations (universities included). Docker CE installed inside
+WSL is free and works identically with Nextflow — don't install Docker Desktop just for
+this.
+
+**Network egress (proxies / firewalls).** A first run reaches out to the internet;
+allowlist outbound HTTPS to at least:
+- `github.com` (pulls the pipeline) and `ghcr.io` + `*.githubusercontent.com` (pulls the
+  container image),
+- `get.nextflow.io` plus your `apt` mirror and a JDK source (one-time tool install),
+- `huggingface.co` — **only** when *rebuilding* the container; the published image already
+  bakes in the models, so normal runs don't need it.
+
+Once the pipeline and container are cached locally, steady-state runs need far less, but
+plan for these on the first run.
+
+**Resource limits (optional).** Cap WSL's memory/CPU via `%UserProfile%\.wslconfig` on a
+shared machine, e.g.:
+```ini
+[wsl2]
+memory=8GB
+processors=4
+```
+
+**Filesystem access note.** The `\\wsl.localhost\<distro>` share Windows uses to browse the
+Linux filesystem is served by a process running **as root** inside the VM, so Explorer can
+see files (e.g. under `/root`) that a normal WSL shell cannot. Prefer writing outputs under
+the normal user's home (`/home/<user>/…`) so they're readable both from Explorer and from a
+plain user shell.
+
 ### Troubleshooting (Windows / WSL2)
 
 - **`wsl --install` fails with `HCS_E_HYPERV_NOT_INSTALLED` / "virtualization is not
@@ -352,7 +411,40 @@ Make image ingestion **capture-software-agnostic**:
 - This pairs naturally with the manifest work: the capture software and its filename
   convention can be recorded at capture time and honored at processing time.
 
-### Modernize `main.nf` for the Nextflow strict parser
+### Fix the image-ordering / frame-numbering bug (round-robin desync)
+
+The sorter has **no per-image record of which box a frame belongs to** — it infers it
+purely from *position in a global ordering* and deals frames round-robin into
+`boxes_per_shelf × shelves` folders (`sort()` in `sorting_functions.py`). That ordering is
+built by parsing **only the trailing `-####`** of the FlyCap filename and sorting by it,
+which silently breaks in two common ways:
+
+- **Counter resets / multiple capture sessions.** FlyCap names files
+  `fc2_save_<date>-<HHMMSS>-<frame####>`, where `frame####` restarts at 0 each time capture
+  is (re)started. The parser ignores the `<HHMMSS>` prefix, so two sessions produce
+  **duplicate frame numbers** that interleave when sorted, scrambling the box assignment.
+  *(Observed directly: a run spanning a camera restart produced duplicate frame numbers,
+  and the labeled experiment folder ended up mixing images from several physical boxes,
+  including QR-less ones.)*
+- **Dropped or extra frames.** A single missing/duplicated capture shifts everything after
+  it by one slot, so every folder downstream becomes a rotating mix of boxes. The camera is
+  known to occasionally drop saves, so this is not hypothetical.
+
+Because labeling only needs to find the QR in ~10 random samples of a folder, a scrambled
+folder still gets stamped with that experiment and drags the wrong images in.
+
+**Fixes to consider:**
+- Order frames by their **full capture identity** (timestamp prefix *and* frame number, or
+  file mtime) rather than the trailing counter alone, so session restarts don't collide.
+- Detect resets/gaps explicitly and refuse to silently round-robin across them — fail loud,
+  or segment per session — instead of mis-sorting.
+- Best: give each frame a **real box identity** instead of inferring it positionally (encode
+  position in the capture filename/metadata at the robot, or QR-detect per image), removing
+  the "one bad frame scrambles everything" fragility entirely.
+- Pairs with the run-config manifest and generalized-ingestion items above: a per-run
+  manifest can also record frames-per-cycle and capture-session boundaries.
+
+### Modernize `main.nf` for the Nextflow strict parser (run on Nextflow 25+/26)
 
 Runs are currently pinned to `24.10.x` because Nextflow 25.x+ defaults to the strict
 "Nextflow language" parser, which rejects `main.nf`'s top-level `Channel.of(...)`
