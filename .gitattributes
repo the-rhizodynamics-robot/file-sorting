@@ -1,0 +1,13 @@
+# Scripts that run inside Linux containers / WSL must keep LF line endings.
+# On a Windows checkout git's autocrlf would otherwise hand them CRLF, turning
+# the shebang `#!/usr/bin/env python3` into `python3\r` and breaking execution
+# (and `image-sort` is served verbatim to `curl`, so its blob must be LF too).
+image-sort       text eol=lf
+*.py             text eol=lf
+*.sh             text eol=lf
+*.nf             text eol=lf
+nextflow.config  text eol=lf
+
+# Never line-ending-normalize compiled/binary artifacts.
+*.pyc            binary
+*.h5             binary

@@ -217,6 +217,43 @@ plain user shell.
 
 ## Usage
 
+### Easy mode: the `image-sort` launcher
+
+For operators who just want to process a run without memorizing Nextflow flags, install the
+`image-sort` launcher once — **no `sudo`, no clone** (it drops a single stdlib-only Python
+script into your user bin):
+
+```bash
+mkdir -p ~/.local/bin && curl -fsSL https://raw.githubusercontent.com/the-rhizodynamics-robot/file-sorting/main/image-sort -o ~/.local/bin/image-sort && chmod +x ~/.local/bin/image-sort
+```
+
+Then **reopen Ubuntu once** (so `~/.local/bin` is on your `PATH`) and run:
+
+```bash
+image-sort
+```
+
+It asks for the images folder (paste the Windows `C:\…` path — it converts it for you),
+boxes per shelf, number of shelves, and whether to build the video — then does the rest:
+pins the Nextflow version, sorts, optionally renders the stabilized video, and prints where
+the output is (including the `\\wsl.localhost\…` path for Explorer). Outputs land under
+`~/image-sort-runs/<name>/`.
+
+Prefer flags? It's scriptable too:
+
+```bash
+image-sort --images 'C:\Users\you\Desktop\run_7_7' --out run_7_7 --boxes-per-shelf 2 --shelves 2 --video
+```
+
+> **Prerequisite:** the launcher only wraps Nextflow, so WSL2 + Docker + Nextflow must
+> already be set up (see [Running on Windows](#running-on-windows-wsl2--docker-ce)).
+> Re-run the `curl` line any time to update the launcher.
+
+The rest of this section documents driving Nextflow directly — which is exactly what
+`image-sort` does under the hood.
+
+### Running Nextflow directly
+
 > ✅ **Strongly recommended: run straight from GitHub — do not clone the repo to run
 > it.** Point Nextflow at the repo and let it pull `main`. This works identically on
 > Linux, macOS, and Windows/WSL2, always runs a known-good revision, and on Windows it

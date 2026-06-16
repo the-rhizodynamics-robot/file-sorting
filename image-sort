@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""image-sort -- friendly launcher for the file-sorting Nextflow pipeline.
+
+Runs entirely inside WSL/Linux and hides the pipeline's sharp edges:
+  - pins NXF_VER to the legacy-parser version the pipeline needs
+  - accepts a pasted Windows path (C:\\...) and converts it to /mnt/c/...
+  - makes an absolute, user-owned output dir and runs from a safe cwd
+  - drives the two-phase sort -> finish(video) workflow
+  - works around the "shelf count = last char of folder name" quirk (see below)
+  - prints the \\\\wsl.localhost path to the result
+
+Stdlib only -- nothing to pip-install. Install with one curl line (see README).
+"""
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+PIPELINE = "the-rhizodynamics-robot/file-sorting"
+REVISION = "main"
+NXF_VER = "24.10.0"
+RUNS_BASE = Path.home() / "image-sort-runs"
+
+
+def win_to_wsl(p: str) -> str:
+    """C:\\Users\\x -> /mnt/c/Users/x ; leave POSIX paths alone."""
+    p = p.strip().strip('"').strip("'")
+    if len(p) >= 2 and p[1] == ":" and p[0].isalpha():
+        return f"/mnt/{p[0].lower()}/" + p[2:].replace("\\", "/").lstrip("/")
+    return p.replace("\\", "/")
+
+
+def wsl_unc(p: Path) -> str:
+    distro = os.environ.get("WSL_DISTRO_NAME", "Ubuntu")
+    return "\\\\wsl.localhost\\" + distro + str(p).replace("/", "\\")
+
+
+def ask(msg, default=None, cast=str, ok=lambda v: True):
+    while True:
+        raw = input(f"{msg}{f' [{default}]' if default is not None else ''}: ").strip()
+        if not raw:
+            if default is not None:
+                return default
+            print("  (required)")
+            continue
+        try:
+            val = cast(raw)
+        except ValueError:
+            print(f"  not a valid {cast.__name__}")
+            continue
+        if not ok(val):
+            print("  invalid value")
+            continue
+        return val
+
+
+def ask_yes(msg, default=True):
+    raw = input(f"{msg} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
+    return default if not raw else raw.startswith("y")
+
+
+def run_step(cmd, env, cwd):
+    if subprocess.run(cmd, env=env, cwd=str(cwd)).returncode != 0:
+        sys.exit("\nA pipeline step failed -- see the Nextflow output above.")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Sort robot images and build root-growth videos.")
+    ap.add_argument("--images", help="Path to the images folder (Windows or WSL path).")
+    ap.add_argument("--out", help="Name for this run (a folder under ~/image-sort-runs).")
+    ap.add_argument("--boxes-per-shelf", type=int)
+    ap.add_argument("--shelves", type=int)
+    ap.add_argument("--video", dest="video", action="store_true", default=None,
+                    help="Also build the stabilized video.")
+    ap.add_argument("--no-video", dest="video", action="store_false")
+    a = ap.parse_args()
+    interactive = a.images is None
+
+    images = Path(win_to_wsl(a.images if a.images else ask("Images folder (paste the Windows path)")))
+    if not images.is_dir():
+        sys.exit(f"Images folder not found: {images}")
+
+    boxes = a.boxes_per_shelf or ask("Boxes per shelf", default=2, cast=int, ok=lambda v: v > 0)
+    shelves = a.shelves or ask("Number of shelves", default=2, cast=int, ok=lambda v: v > 0)
+    make_video = a.video if a.video is not None else (ask_yes("Make stabilized video?") if interactive else False)
+    name = a.out or (ask("Output name", default=images.name) if interactive else images.name)
+
+    run_dir = (RUNS_BASE / name).resolve()
+    sort_path = run_dir / "sorting_project"
+    work_dir = run_dir / "work"
+    sort_path.mkdir(parents=True, exist_ok=True)
+
+    # Shelf-count workaround: the pipeline infers shelves from the LAST CHARACTER of the
+    # images folder name and computes num_boxes = boxes_per_shelf * shelves. We can't rename
+    # the user's folder, so we stage a symlink whose name ends in "1" and pass the *total*
+    # box count as --boxes_per_shelf. Then num_boxes = (boxes*shelves) * 1, correct for any
+    # shelf count (incl. >= 10). Removed once the run-config manifest lands.
+    staged = run_dir / "input1"
+    if staged.is_symlink() or staged.exists():
+        staged.unlink()
+    staged.symlink_to(images, target_is_directory=True)
+    total_boxes = boxes * shelves
+
+    base = ["nextflow", "run", PIPELINE, "-r", REVISION, "-profile", "local",
+            "-work-dir", str(work_dir),
+            "--images_path", str(staged),
+            "--sort_path", str(sort_path),
+            "--boxes_per_shelf", str(total_boxes),
+            "--unzip", "false", "--archive", "false"]
+    env = dict(os.environ, NXF_VER=NXF_VER)
+
+    print(f"\n-> Sorting {images.name}  ({boxes} boxes x {shelves} shelves = {total_boxes} positions)...")
+    run_step(base, env, run_dir)
+    if make_video:
+        print("-> Rendering video...")
+        run_step(base + ["--finish_only", "true"], env, run_dir)
+
+    print("\nDone. Output:")
+    print(f"  WSL:      {sort_path}")
+    print(f"  Explorer: {wsl_unc(sort_path)}")
+    if make_video:
+        print(f"  Video:    {wsl_unc(sort_path / 'data' / 'videos' / 'stabilized')}")
+
+
+if __name__ == "__main__":
+    main()
