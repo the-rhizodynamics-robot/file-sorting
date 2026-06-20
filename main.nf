@@ -8,8 +8,6 @@ params.stabilize = true
 params.unzip = true
 params.archive = true
 
-path_ch = Channel.of([params.images_path, params.sort_path])
-
 process file_sorting {
     container 'ghcr.io/the-rhizodynamics-robot/file-sorting-env:latest'
 
@@ -29,6 +27,7 @@ process file_sorting {
 }
 
 workflow {
+    path_ch = Channel.of([params.images_path, params.sort_path])
     file_sorting(path_ch)
 }
 
