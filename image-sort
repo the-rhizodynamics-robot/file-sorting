@@ -2,7 +2,6 @@
 """image-sort -- friendly launcher for the file-sorting Nextflow pipeline.
 
 Runs entirely inside WSL/Linux and hides the pipeline's sharp edges:
-  - pins NXF_VER to the legacy-parser version the pipeline needs
   - accepts a pasted Windows path (C:\\...) and converts it to /mnt/c/...
   - makes an absolute, user-owned output dir and runs from a safe cwd
   - drives the two-phase sort -> finish(video) workflow
@@ -19,7 +18,6 @@ from pathlib import Path
 
 PIPELINE = "the-rhizodynamics-robot/file-sorting"
 REVISION = "main"
-NXF_VER = "24.10.0"
 RUNS_BASE = Path.home() / "image-sort-runs"
 
 
@@ -108,7 +106,7 @@ def main():
             "--sort_path", str(sort_path),
             "--boxes_per_shelf", str(total_boxes),
             "--unzip", "false", "--archive", "false"]
-    env = dict(os.environ, NXF_VER=NXF_VER)
+    env = dict(os.environ)
 
     print(f"\n-> Sorting {images.name}  ({boxes} boxes x {shelves} shelves = {total_boxes} positions)...")
     run_step(base, env, run_dir)

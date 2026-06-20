@@ -20,7 +20,7 @@ Process a robot run in a few minutes from a Linux/WSL shell.
   that means **WSL2 + Docker CE + Nextflow** — see the one-time
   [setup](#running-on-windows-wsl2--docker-ce).
 - That's all you install; the processing container and ML models are pulled automatically on
-  the first run, and the launcher pins Nextflow to `24.10.x` for you.
+  the first run. Runs on current Nextflow (tested on 26.04) — no version pin needed.
 
 **1. Install the `image-sort` launcher** (no `sudo`, no clone):
 
@@ -86,23 +86,11 @@ Outputs land under your `--sort_path` in a fixed directory layout (see
 
 ## Requirements
 
-- **Nextflow** (needs Java 11+). **Pin to `24.10.x`** — see the version note below.
+- **Nextflow** (needs Java 11+). Any current version works, including **25.x / 26.x**.
 - **A Docker engine** that can run `linux/amd64` images.
 
 That's it on the host. Nextflow pulls
 `ghcr.io/the-rhizodynamics-robot/file-sorting-env:latest` on first run.
-
-> ⚠️ **Nextflow version — pin to `24.10.x`.** Nextflow **25.x+** makes its strict
-> "Nextflow language" parser the default, and that parser rejects the top-level
-> statements in `main.nf` (the `Channel.of(...)` channel definition and the
-> `workflow.onComplete { … }` hook) with
-> `Statements cannot be mixed with script declarations`. The code is still valid
-> DSL2 — only the **parser** changed — so the fix is to pin the version, not rewrite
-> the pipeline. Prefix any run with `NXF_VER=24.10.0`:
-> ```bash
-> NXF_VER=24.10.0 nextflow run …
-> ```
-> Modernizing `main.nf` for the strict parser is on the [Roadmap](#roadmap).
 
 > **Note on platforms.** Nextflow is a POSIX/Linux tool — it does **not** run on
 > native Windows (PowerShell/CMD/Git Bash). On Windows it runs inside **WSL2**, which
@@ -296,7 +284,7 @@ plain user shell.
 > sidesteps the CRLF line-ending bug that breaks a local Windows clone (explained below).
 
 ```bash
-NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
+nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
   --images_path /mnt/c/Users/you/Desktop/run_7_7 \
   --sort_path   /home/you/sorting_project \
   --boxes_per_shelf 3 \
@@ -305,8 +293,7 @@ NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profi
 ```
 
 That single command pulls the pipeline, pulls the container, and runs it — no clone, no
-build. `-r main` pins the revision (use a tag or commit SHA for full reproducibility);
-`NXF_VER=24.10.0` pins Nextflow to the legacy parser (see [Requirements](#requirements)).
+build. `-r main` pins the revision (use a tag or commit SHA for full reproducibility).
 
 > **`--sort_path` must be an existing, absolute directory.** It's staged as a Nextflow
 > `path()` input, so a relative path is rejected (`Not a valid path value: './…'`).
@@ -329,7 +316,7 @@ Nextflow's `-resume` flag re-uses cached work if a run is interrupted.
 If you do clone the repo, run `main.nf` directly:
 
 ```bash
-NXF_VER=24.10.0 nextflow run main.nf -profile local \
+nextflow run main.nf -profile local \
   --images_path /path/to/run_images_or_zip \
   --sort_path   /path/to/project_dir \
   --boxes_per_shelf 3
@@ -352,13 +339,13 @@ To finalize one or more batches and render their videos, run a second pass with
 
 ```bash
 # 1) Sort a run (creates / grows experiments under current_exp/)
-NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
+nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
   --images_path /mnt/c/Users/you/Desktop/run_7_7 \
   --sort_path   /home/you/sorting_project \
   --boxes_per_shelf 3 --unzip false --archive false
 
 # 2) Finish: move current_exp/ -> finished_exp/ and render the (stabilized) videos
-NXF_VER=24.10.0 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
+nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
   --images_path /mnt/c/Users/you/Desktop/run_7_7 \
   --sort_path   /home/you/sorting_project \
   --boxes_per_shelf 3 --finish_only true --unzip false --archive false
@@ -517,17 +504,6 @@ folder still gets stamped with that experiment and drags the wrong images in.
 - Pairs with the run-config manifest and generalized-ingestion items above: a per-run
   manifest can also record frames-per-cycle and capture-session boundaries.
 
-### Modernize `main.nf` for the Nextflow strict parser (run on Nextflow 25+/26)
-
-Runs are currently pinned to `24.10.x` because Nextflow 25.x+ defaults to the strict
-"Nextflow language" parser, which rejects `main.nf`'s top-level `Channel.of(...)`
-definition and `workflow.onComplete { … }` hook (see the [version note](#requirements)).
-The code is valid DSL2 — only the parser changed — so the long-term fix is to bring the
-syntax up to what the strict parser accepts (move the channel construction inside
-`workflow { }`, and replace/relocate `onComplete` — likely folding the archive step into
-the workflow or an `output`/`publishDir` mechanism). Doing this lets the pipeline run on
-current Nextflow without the `NXF_VER` pin. Until then, pinning is the supported path.
-
 ### Native Apple Silicon (arm64) support — longer-term, lower priority
 
 macOS is currently [untested](#macos-apple-silicon-experimental--untested) because the
@@ -556,6 +532,6 @@ This pipeline is part of the Rhizodynamics Robot. If you use it, please cite:
 machine the full path is confirmed working: `wsl --install -d Ubuntu`, Docker CE under
 systemd, and a complete pipeline run that pulled the `file-sorting-env` container, sorted
 and labeled a real image set, and — via the `--finish_only` pass — produced both
-unstabilized and stabilized `.mp4` videos. The run was launched **from GitHub** under
-**`NXF_VER=24.10.0`**; both choices are load-bearing (LF line endings and the legacy
-parser, respectively, as documented above).
+unstabilized and stabilized `.mp4` videos. The run was launched **from GitHub** (LF line
+endings, as documented above). `main.nf` uses the strict "Nextflow language" syntax and
+parses on current Nextflow (25.x / 26.x) with no version pin.

@@ -29,29 +29,29 @@ process file_sorting {
 workflow {
     path_ch = Channel.of([params.images_path, params.sort_path])
     file_sorting(path_ch)
-}
 
-workflow.onComplete { 
-    if (workflow.success && params.archive) {
-        def source = file(params.images_path)
-        def destination = file("${params.sort_path}/data/unsorted_unlabeled_processed/${source.name}")
+    workflow.onComplete = {
+        if (workflow.success && params.archive) {
+            def source = file(params.images_path)
+            def destination = file("${params.sort_path}/data/unsorted_unlabeled_processed/${source.name}")
 
-        if (source.exists()) {
-            if (source.isDirectory()) {
-                println "Moving directory ${source} to ${destination}"
-                destination.mkdirs()
-                source.eachFile { file ->
-                    file.moveTo(destination.resolve(file.name))
+            if (source.exists()) {
+                if (source.isDirectory()) {
+                    println "Moving directory ${source} to ${destination}"
+                    destination.mkdirs()
+                    source.eachFile { f ->
+                        f.moveTo(destination.resolve(f.name))
+                    }
+                } else {
+                    println "Moving file ${source} to ${destination}"
+                    destination.parent.mkdirs()
+                    source.moveTo(destination)
                 }
             } else {
-                println "Moving file ${source} to ${destination}"
-                destination.parent.mkdirs()
-                source.moveTo(destination)
+                println "Source path ${source} does not exist."
             }
         } else {
-            println "Source path ${source} does not exist."
+            println "Skipping file/directory archive step."
         }
-    } else {
-        println "Skipping file/directory archive step."
     }
 }
