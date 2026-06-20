@@ -25,10 +25,15 @@ Process a robot run in a few minutes from a Linux/WSL shell.
 **1. Install the `image-sort` launcher** (no `sudo`, no clone):
 
 ```bash
-mkdir -p ~/.local/bin && curl -fsSL https://raw.githubusercontent.com/the-rhizodynamics-robot/file-sorting/main/image-sort -o ~/.local/bin/image-sort && chmod +x ~/.local/bin/image-sort
+mkdir -p ~/.local/bin && \
+curl -fsSL https://raw.githubusercontent.com/the-rhizodynamics-robot/file-sorting/main/image-sort -o ~/.local/bin/image-sort && \
+chmod +x ~/.local/bin/image-sort && \
+{ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc; } && \
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Reopen Ubuntu once afterward so `~/.local/bin` is on your `PATH`.
+This also adds `~/.local/bin` to your `PATH` (in `~/.bashrc`) and activates it in the
+current shell, so `image-sort` works immediately — no need to reopen Ubuntu.
 
 **2. Run it:**
 
