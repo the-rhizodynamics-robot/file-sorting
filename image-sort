@@ -2,16 +2,18 @@
 """image-sort -- friendly launcher for the file-sorting Nextflow pipeline.
 
 Runs entirely inside WSL/Linux and hides the pipeline's sharp edges:
+  - preflight-checks the environment (nextflow / java / docker) up front
   - accepts a pasted Windows path (C:\\...) and converts it to /mnt/c/...
-  - makes an absolute, user-owned output dir and runs from a safe cwd
+  - runs on fast ext4 (~/image-sort-runs), then optionally copies the
+    results to a folder you choose (e.g. back onto your Windows desktop)
   - drives the two-phase sort -> finish(video) workflow
   - works around the "shelf count = last char of folder name" quirk (see below)
-  - prints the \\\\wsl.localhost path to the result
 
 Stdlib only -- nothing to pip-install. Install with one curl line (see README).
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -29,9 +31,56 @@ def win_to_wsl(p: str) -> str:
     return p.replace("\\", "/")
 
 
+def to_path(raw: str, what: str) -> Path:
+    """Convert a pasted Windows/WSL path to a Path, rejecting UNC paths clearly."""
+    s = raw.strip().strip('"').strip("'")
+    if s.startswith("\\\\") or s.startswith("//"):
+        sys.exit(
+            f"{what}: network/UNC paths (\\\\server\\share) aren't supported here.\n"
+            "Copy the data onto a local drive (e.g. C:\\...) or into WSL first."
+        )
+    return Path(win_to_wsl(s))
+
+
+def win_display(p: Path):
+    """/mnt/c/Users/x -> C:\\Users\\x for display; None if not a Windows mount."""
+    s = str(p)
+    if s.startswith("/mnt/") and len(s) > 6 and s[6] == "/":
+        return s[5].upper() + ":" + s[6:].replace("/", "\\")
+    return None
+
+
 def wsl_unc(p: Path) -> str:
     distro = os.environ.get("WSL_DISTRO_NAME", "Ubuntu")
     return "\\\\wsl.localhost\\" + distro + str(p).replace("/", "\\")
+
+
+def preflight():
+    """Fail early, with a clear message, if the environment isn't ready."""
+    missing = []
+    if not shutil.which("nextflow"):
+        missing.append("nextflow  (https://www.nextflow.io/ -- needs Java 11+)")
+    if not shutil.which("java"):
+        missing.append("java 11+  (e.g. sudo apt install default-jre)")
+    if not shutil.which("docker"):
+        missing.append("docker    (the Docker engine)")
+    if missing:
+        sys.exit("Missing required tools:\n  - " + "\n  - ".join(missing))
+
+    r = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0:
+        if "permission denied" in (r.stderr or "").lower():
+            sys.exit(
+                "Docker is installed but you don't have permission to use it.\n"
+                "Add yourself to the docker group, then restart WSL:\n"
+                "  sudo usermod -aG docker $USER\n"
+                "  (then run `wsl --shutdown` from Windows and reopen Ubuntu)"
+            )
+        sys.exit(
+            "Docker is installed but the daemon isn't reachable.\n"
+            "Start it (Docker Desktop, or `sudo service docker start`) and try again."
+        )
 
 
 def ask(msg, default=None, cast=str, ok=lambda v: True):
@@ -66,7 +115,9 @@ def run_step(cmd, env, cwd):
 def main():
     ap = argparse.ArgumentParser(description="Sort robot images and build root-growth videos.")
     ap.add_argument("--images", help="Path to the images folder (Windows or WSL path).")
-    ap.add_argument("--out", help="Name for this run (a folder under ~/image-sort-runs).")
+    ap.add_argument("--name", help="Name for this run (a folder under ~/image-sort-runs).")
+    ap.add_argument("--dest", help="Copy results here when done (Windows or WSL path). "
+                                   "Optional -- results always remain in WSL too.")
     ap.add_argument("--boxes-per-shelf", type=int)
     ap.add_argument("--shelves", type=int)
     ap.add_argument("--video", dest="video", action="store_true", default=None,
@@ -75,14 +126,27 @@ def main():
     a = ap.parse_args()
     interactive = a.images is None
 
-    images = Path(win_to_wsl(a.images if a.images else ask("Images folder (paste the Windows path)")))
+    preflight()
+
+    images = to_path(a.images if a.images else ask("Images folder (paste the Windows path)"),
+                     "Images folder")
     if not images.is_dir():
-        sys.exit(f"Images folder not found: {images}")
+        hint = ("\n(if this is on a network or external drive, it may not be mounted in WSL)"
+                if str(images).startswith("/mnt/") else "")
+        sys.exit(f"Images folder not found: {images}{hint}")
 
     boxes = a.boxes_per_shelf or ask("Boxes per shelf", default=2, cast=int, ok=lambda v: v > 0)
     shelves = a.shelves or ask("Number of shelves", default=2, cast=int, ok=lambda v: v > 0)
     make_video = a.video if a.video is not None else (ask_yes("Make stabilized video?") if interactive else False)
-    name = a.out or (ask("Output name", default=images.name) if interactive else images.name)
+    name = a.name or (ask("Run name", default=images.name) if interactive else images.name)
+
+    if a.dest is not None:
+        dest_raw = a.dest
+    elif interactive:
+        dest_raw = input("Copy results to (Windows path, or Enter to keep in WSL only): ").strip()
+    else:
+        dest_raw = ""
+    dest = to_path(dest_raw, "Destination").resolve() if dest_raw else None
 
     run_dir = (RUNS_BASE / name).resolve()
     sort_path = run_dir / "sorting_project"
@@ -114,11 +178,22 @@ def main():
         print("-> Rendering video...")
         run_step(base + ["--finish_only", "true"], env, run_dir)
 
-    print("\nDone. Output:")
+    if dest:
+        print(f"-> Copying results to {win_display(dest) or dest} ...")
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(sort_path, dest, dirs_exist_ok=True)
+        except (PermissionError, OSError) as e:
+            sys.exit(f"\nCould not write results to {dest}:\n  {e}\n"
+                     f"The sorted output is still in WSL at:\n  {sort_path}")
+
+    print("\nDone. Results:")
     print(f"  WSL:      {sort_path}")
     print(f"  Explorer: {wsl_unc(sort_path)}")
     if make_video:
         print(f"  Video:    {wsl_unc(sort_path / 'data' / 'videos' / 'stabilized')}")
+    if dest:
+        print(f"  Copied to: {win_display(dest) or dest}")
 
 
 if __name__ == "__main__":

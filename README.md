@@ -37,14 +37,22 @@ image-sort
 ```
 
 It asks for the images folder (paste the Windows `C:\…` path — it converts it for you), boxes
-per shelf, number of shelves, and whether to build the video, then sorts, labels, and
-optionally renders the stabilized video. Outputs land under `~/image-sort-runs/<name>/`, and
-it prints the `\\wsl.localhost\…` path so you can open the results in File Explorer.
+per shelf, number of shelves, whether to build the video, and — optionally — a folder to copy
+the results to (paste a Windows `C:\…` path to get them back on your desktop; press Enter to
+leave them in WSL only). It then sorts, labels, and optionally renders the stabilized video.
+The run is processed on fast Linux storage under `~/image-sort-runs/<name>/`; it prints the
+`\\wsl.localhost\…` path so you can open the results in File Explorer, and copies them to your
+chosen `--dest` if you gave one.
+
+Before it starts, it checks that Nextflow, Java, and a running Docker engine are present, and
+tells you exactly what's missing if not.
 
 Prefer flags (scriptable)?
 
 ```bash
-image-sort --images 'C:\Users\you\Desktop\run_7_7' --out run_7_7 --boxes-per-shelf 2 --shelves 2 --video
+image-sort --images 'C:\Users\you\Desktop\run_7_7' --name run_7_7 \
+  --boxes-per-shelf 2 --shelves 2 --video \
+  --dest 'C:\Users\you\Desktop\run_7_7_results'
 ```
 
 > **First time on this machine?** Do the one-time
