@@ -11,6 +11,48 @@ into the image.
 
 ---
 
+## Quickstart
+
+Process a robot run in a few minutes from a Linux/WSL shell.
+
+**Requirements**
+- A Linux shell with a **Docker engine** and **Nextflow** (needs Java 11+). On **Windows**
+  that means **WSL2 + Docker CE + Nextflow** — see the one-time
+  [setup](#running-on-windows-wsl2--docker-ce).
+- That's all you install; the processing container and ML models are pulled automatically on
+  the first run, and the launcher pins Nextflow to `24.10.x` for you.
+
+**1. Install the `image-sort` launcher** (no `sudo`, no clone):
+
+```bash
+mkdir -p ~/.local/bin && curl -fsSL https://raw.githubusercontent.com/the-rhizodynamics-robot/file-sorting/main/image-sort -o ~/.local/bin/image-sort && chmod +x ~/.local/bin/image-sort
+```
+
+Reopen Ubuntu once afterward so `~/.local/bin` is on your `PATH`.
+
+**2. Run it:**
+
+```bash
+image-sort
+```
+
+It asks for the images folder (paste the Windows `C:\…` path — it converts it for you), boxes
+per shelf, number of shelves, and whether to build the video, then sorts, labels, and
+optionally renders the stabilized video. Outputs land under `~/image-sort-runs/<name>/`, and
+it prints the `\\wsl.localhost\…` path so you can open the results in File Explorer.
+
+Prefer flags (scriptable)?
+
+```bash
+image-sort --images 'C:\Users\you\Desktop\run_7_7' --out run_7_7 --boxes-per-shelf 2 --shelves 2 --video
+```
+
+> **First time on this machine?** Do the one-time
+> [WSL2 + Docker + Nextflow setup](#running-on-windows-wsl2--docker-ce) first.
+> **Prefer to drive Nextflow directly?** See [Usage](#usage).
+
+---
+
 ## Where this fits
 
 The GROOT system is three repositories:
@@ -78,6 +120,10 @@ an HPC scheduler or cloud batch by changing only the executor).
 **Also supported: a Windows machine, via WSL2.** Fully workable and documented below;
 it just requires the one-time WSL2 + Docker setup.
 
+**Experimental, untested: macOS.** It *should* work (macOS is Unix), but on **Apple
+Silicon — nearly every current Mac** — the `linux/amd64` container runs under emulation and
+is **unverified**. See [macOS (Apple Silicon)](#macos-apple-silicon-experimental--untested).
+
 ### Setup — Linux / macOS
 
 ```bash
@@ -89,6 +135,27 @@ sudo usermod -aG docker "$USER"   # log out/in after this
 curl -s https://get.nextflow.io | bash
 sudo mv nextflow /usr/local/bin/
 ```
+
+### macOS (Apple Silicon): experimental / untested
+
+> ⚠️ **Not tested on macOS.** The pipeline *should* run — macOS is Unix, so Nextflow + a
+> Docker engine are all it needs, and the `image-sort` launcher already tolerates POSIX
+> paths. **But** the published container is **`linux/amd64` only**, and **nearly all current
+> Macs are Apple Silicon (M-series)**, where Docker runs amd64 images under **emulation**. We
+> have not run it on Apple Silicon and can't promise it works.
+
+**What you can try (at your own risk):**
+- Install **Docker Desktop** (turn on *Settings → General → Use Rosetta for x86/amd64
+  emulation* for better speed) or **[Colima](https://github.com/abiosoft/colima)**
+  (`colima start --arch x86_64`), plus **Nextflow**, **Java**, and **python3** (Homebrew or
+  the Xcode command-line tools).
+- Run normally, e.g. `nextflow run the-rhizodynamics-robot/file-sorting -r main …`. Expect it
+  to be **slower** than native, and note the old TensorFlow 1.x / Python 3.7 stack may not
+  emulate cleanly.
+
+**What we actually recommend on a Mac:** run on a **Linux host or cloud VM** (native
+`amd64`) rather than your laptop — that's the reliable path until there's a native build (see
+[Roadmap](#roadmap)).
 
 ### Running on Windows (WSL2 + Docker CE)
 
@@ -217,40 +284,9 @@ plain user shell.
 
 ## Usage
 
-### Easy mode: the `image-sort` launcher
-
-For operators who just want to process a run without memorizing Nextflow flags, install the
-`image-sort` launcher once — **no `sudo`, no clone** (it drops a single stdlib-only Python
-script into your user bin):
-
-```bash
-mkdir -p ~/.local/bin && curl -fsSL https://raw.githubusercontent.com/the-rhizodynamics-robot/file-sorting/main/image-sort -o ~/.local/bin/image-sort && chmod +x ~/.local/bin/image-sort
-```
-
-Then **reopen Ubuntu once** (so `~/.local/bin` is on your `PATH`) and run:
-
-```bash
-image-sort
-```
-
-It asks for the images folder (paste the Windows `C:\…` path — it converts it for you),
-boxes per shelf, number of shelves, and whether to build the video — then does the rest:
-pins the Nextflow version, sorts, optionally renders the stabilized video, and prints where
-the output is (including the `\\wsl.localhost\…` path for Explorer). Outputs land under
-`~/image-sort-runs/<name>/`.
-
-Prefer flags? It's scriptable too:
-
-```bash
-image-sort --images 'C:\Users\you\Desktop\run_7_7' --out run_7_7 --boxes-per-shelf 2 --shelves 2 --video
-```
-
-> **Prerequisite:** the launcher only wraps Nextflow, so WSL2 + Docker + Nextflow must
-> already be set up (see [Running on Windows](#running-on-windows-wsl2--docker-ce)).
-> Re-run the `curl` line any time to update the launcher.
-
-The rest of this section documents driving Nextflow directly — which is exactly what
-`image-sort` does under the hood.
+> **Just want to run it?** The `image-sort` launcher in the [Quickstart](#quickstart) wraps
+> everything below — install it and you can skip this section. What follows is how to drive
+> Nextflow directly, which is exactly what `image-sort` does under the hood.
 
 ### Running Nextflow directly
 
@@ -491,6 +527,16 @@ syntax up to what the strict parser accepts (move the channel construction insid
 `workflow { }`, and replace/relocate `onComplete` — likely folding the archive step into
 the workflow or an `output`/`publishDir` mechanism). Doing this lets the pipeline run on
 current Nextflow without the `NXF_VER` pin. Until then, pinning is the supported path.
+
+### Native Apple Silicon (arm64) support — longer-term, lower priority
+
+macOS is currently [untested](#macos-apple-silicon-experimental--untested) because the
+container is `linux/amd64` only and most Macs are Apple Silicon, where it runs under
+emulation. A native `linux/arm64` image is **not a simple rebuild**: TensorFlow 1.x has no
+arm64 Linux wheels, so it would mean modernizing the inference stack (a newer TF or a
+different runtime) and re-validating the QR/seed models — a substantial effort. **This is
+deliberately low priority:** the immediate goal is a solid, tested **Linux + Windows/WSL2**
+experience; native Mac support is a later infra-modernization nice-to-have.
 
 ---
 
