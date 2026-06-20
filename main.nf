@@ -8,6 +8,15 @@ params.stabilize = true
 params.unzip = true
 params.archive = true
 
+// Interpret boolean params robustly. On the command line, `--unzip false` arrives
+// as the STRING "false", which is truthy in Groovy -- so a plain `params.unzip ?`
+// test would wrongly enable it. (Older Nextflow coerced "false" -> boolean; 25+/26
+// does not.) asBool() makes "false"/"0"/"no" behave as false.
+def asBool(v) {
+    def s = v.toString().toLowerCase()
+    return s == 'true' || s == '1' || s == 'yes' || s == 'y'
+}
+
 process file_sorting {
     container 'ghcr.io/the-rhizodynamics-robot/file-sorting-env:latest'
 
@@ -20,9 +29,9 @@ process file_sorting {
         --destination_path ${sort_path} \
         --model_path /app/models/ \
         --boxes_per_shelf ${params.boxes_per_shelf} \
-        ${params.finish_only ? '--finish_only' : ''} \
-        ${params.stabilize ? '--stabilize' : ''} \
-        ${params.unzip ? '--unzip' : ''} 
+        ${asBool(params.finish_only) ? '--finish_only' : ''} \
+        ${asBool(params.stabilize) ? '--stabilize' : ''} \
+        ${asBool(params.unzip) ? '--unzip' : ''}
     """
 }
 
@@ -31,7 +40,7 @@ workflow {
     file_sorting(path_ch)
 
     workflow.onComplete = {
-        if (workflow.success && params.archive) {
+        if (workflow.success && asBool(params.archive)) {
             def source = file(params.images_path)
             def destination = file("${params.sort_path}/data/unsorted_unlabeled_processed/${source.name}")
 
