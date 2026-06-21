@@ -55,6 +55,16 @@ def wsl_unc(p: Path) -> str:
     return "\\\\wsl.localhost\\" + distro + str(p).replace("/", "\\")
 
 
+def on_wsl() -> bool:
+    """True only on WSL (so we don't print Windows-isms on a native Linux box)."""
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
 def preflight():
     """Fail early, with a clear message, if the environment isn't ready."""
     missing = []
@@ -116,8 +126,10 @@ def main():
     ap = argparse.ArgumentParser(description="Sort robot images and build root-growth videos.")
     ap.add_argument("--images", help="Path to the images folder (Windows or WSL path).")
     ap.add_argument("--name", help="Name for this run (a folder under ~/image-sort-runs).")
-    ap.add_argument("--dest", help="Copy results here when done (Windows or WSL path). "
-                                   "Optional -- results always remain in WSL too.")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="If a run with this name already exists, delete it and start fresh.")
+    ap.add_argument("--dest", help="Copy results here when done (Windows or Linux path). "
+                                   "Optional -- results always remain in the run dir too.")
     ap.add_argument("--boxes-per-shelf", type=int)
     ap.add_argument("--shelves", type=int)
     ap.add_argument("--video", dest="video", action="store_true", default=None,
@@ -125,11 +137,12 @@ def main():
     ap.add_argument("--no-video", dest="video", action="store_false")
     a = ap.parse_args()
     interactive = a.images is None
+    wsl = on_wsl()
 
     preflight()
 
-    images = to_path(a.images if a.images else ask("Images folder (paste the Windows path)"),
-                     "Images folder")
+    img_prompt = "Images folder" + (" (paste the Windows C:\\ path)" if wsl else "")
+    images = to_path(a.images if a.images else ask(img_prompt), "Images folder")
     if not images.is_dir():
         hint = ("\n(if this is on a network or external drive, it may not be mounted in WSL)"
                 if str(images).startswith("/mnt/") else "")
@@ -143,12 +156,25 @@ def main():
     if a.dest is not None:
         dest_raw = a.dest
     elif interactive:
-        dest_raw = input("Copy results to (Windows path, or Enter to keep in WSL only): ").strip()
+        dest_hint = "Windows path, or " if wsl else ""
+        dest_raw = input(f"Copy results to ({dest_hint}Enter to keep here): ").strip()
     else:
         dest_raw = ""
     dest = to_path(dest_raw, "Destination").resolve() if dest_raw else None
 
+    # A sort run can't ingest into an already-populated project: the pipeline does
+    # shutil.copytree(images -> unsorted_unlabeled/input1), which errors if that dir
+    # exists (container Python 3.7 has no dirs_exist_ok). So a same-name re-run would
+    # crash cryptically -- guard it: overwrite (fresh) or refuse.
     run_dir = (RUNS_BASE / name).resolve()
+    if run_dir.exists():
+        if a.overwrite or (interactive and ask_yes(
+                f"A run named '{name}' already exists at {run_dir}.\n"
+                "  Overwrite it (delete and start fresh)?", default=False)):
+            shutil.rmtree(run_dir)
+        else:
+            sys.exit(f"Run '{name}' already exists -- pick a different --name, or pass "
+                     f"--overwrite to replace it.\n  Existing: {run_dir}")
     sort_path = run_dir / "sorting_project"
     work_dir = run_dir / "work"
     sort_path.mkdir(parents=True, exist_ok=True)
@@ -188,10 +214,11 @@ def main():
                      f"The sorted output is still in WSL at:\n  {sort_path}")
 
     print("\nDone. Results:")
-    print(f"  WSL:      {sort_path}")
-    print(f"  Explorer: {wsl_unc(sort_path)}")
+    print(f"  Output: {sort_path}")
     if make_video:
-        print(f"  Video:    {wsl_unc(sort_path / 'data' / 'videos' / 'stabilized')}")
+        print(f"  Video:  {sort_path / 'data' / 'videos' / 'stabilized'}")
+    if wsl:
+        print(f"  Open in Explorer: {wsl_unc(sort_path)}")
     if dest:
         print(f"  Copied to: {win_display(dest) or dest}")
 
