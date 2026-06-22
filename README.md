@@ -63,6 +63,11 @@ image-sort --mode sort --project barley_2026 \
   --images 'C:\Users\you\Desktop\20260613_120000_3' \
   --boxes-per-shelf 2 --dest 'C:\Users\you\Desktop\barley_videos'
 
+# add --archive to MOVE the raw run into the project after sorting (empties the source folder)
+image-sort --mode sort --project barley_2026 \
+  --images 'C:\Users\you\Desktop\20260613_120000_3' \
+  --boxes-per-shelf 2 --archive
+
 # later: finish specific experiments, or turn the whole project over
 image-sort --mode finish     --project barley_2026 --exp 100001,100002 --dest 'C:\Users\you\Desktop\barley_videos'
 image-sort --mode finish-all --project barley_2026                     --dest 'C:\Users\you\Desktop\barley_videos'

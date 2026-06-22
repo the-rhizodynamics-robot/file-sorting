@@ -169,11 +169,11 @@ def derive_shelves(folder_name):
     return int(seg) if seg.isdigit() else None
 
 
-def nf_base(sort_path, work_dir, revision):
+def nf_base(sort_path, work_dir, revision, archive=False):
     return ["nextflow", "run", PIPELINE, "-r", revision, "-latest", "-profile", "local",
             "-work-dir", str(work_dir),
             "--sort_path", str(sort_path),
-            "--unzip", "false", "--archive", "false"]
+            "--unzip", "false", "--archive", "true" if archive else "false"]
 
 
 def resolve_dest(a, wsl, interactive):
@@ -273,14 +273,25 @@ def do_sort(a, wsl, interactive):
         if leftover.exists():
             shutil.rmtree(leftover, ignore_errors=True)
 
+    if a.archive:
+        # Archiving moves the raw run out of the source folder into the project's
+        # data/unsorted_unlabeled_processed/ AFTER images are copied in for sorting. The
+        # source folder ends up empty -- safe (the images live in the project now), but the
+        # original location is consumed. Confirm interactively since it's not reversible there.
+        src_disp = win_display(images) or images
+        print(f"NOTE: --archive will MOVE (empty) the source folder after sorting:\n  {src_disp}")
+        if interactive and not ask_yes("Proceed and archive (empty) the source folder?", default=True):
+            sys.exit("Cancelled.")
+
     before = stabilized_videos(sort_path)
-    cmd = nf_base(sort_path, work_dir, a.revision) + [
+    cmd = nf_base(sort_path, work_dir, a.revision, archive=a.archive) + [
         "--images_path", str(staged),
         "--boxes_per_shelf", str(boxes),
         "--stabilize", "true" if stabilize else "false",
     ]
     print(f"\n-> Sorting {source_name} into project '{run_dir.name}'  "
-          f"({boxes} boxes x {shelves} shelves)...")
+          f"({boxes} boxes x {shelves} shelves"
+          f"{'; archiving source after' if a.archive else ''})...")
     run_step(cmd, run_dir)
 
     dest = resolve_dest(a, wsl, interactive)
@@ -343,6 +354,9 @@ def main():
                     help="Stabilize videos (default).")
     ap.add_argument("--no-stabilize", dest="stabilize", action="store_false",
                     help="Skip stabilization.")
+    ap.add_argument("--archive", action="store_true",
+                    help="[sort] After sorting, MOVE the raw run out of the source folder into "
+                         "the project's data/unsorted_unlabeled_processed/ (empties the source).")
     ap.add_argument("--overwrite", action="store_true",
                     help="[sort] Delete and recreate the project before sorting.")
     ap.add_argument("--revision", default=REVISION, help="Pipeline git revision to run (advanced).")
