@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """image-sort -- friendly launcher for the file-sorting Nextflow pipeline.
 
-Runs entirely inside WSL/Linux and hides the pipeline's sharp edges:
-  - preflight-checks the environment (nextflow / java / docker) up front
-  - accepts a pasted Windows path (C:\\...) and converts it to /mnt/c/...
-  - runs on fast ext4 (~/image-sort-runs), then optionally copies the
-    results to a folder you choose (e.g. back onto your Windows desktop)
-  - drives the two-phase sort -> finish(video) workflow
-  - works around the "shelf count = last char of folder name" quirk (see below)
+Project-centric: feed many robot runs into one named project. Experiments accumulate
+in the project and finish (move to finished_exp + stabilized video) automatically when
+a sort run adds no new images to them. You can also finish specific experiments, or
+finish everything ("turn over"), on demand.
+
+Modes:
+  sort        Sort a run's images into a project (default). Videos appear on their own
+              as experiments go static across runs.
+  finish      Finalize specific experiment number(s) now (move to finished + video).
+  finish-all  Finalize everything currently in the project (turn it over).
+
+Shelf count comes from the LAST CHARACTER of the run folder's name (the robot names
+runs ending in the shelf count, e.g. 20260613_120000_3) -- so you don't enter it.
+Use --shelves to override for ad-hoc folders.
 
 Stdlib only -- nothing to pip-install. Install with one curl line (see README).
 """
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -23,6 +31,7 @@ REVISION = "main"
 RUNS_BASE = Path.home() / "image-sort-runs"
 
 
+# ---------- path helpers ----------
 def win_to_wsl(p: str) -> str:
     """C:\\Users\\x -> /mnt/c/Users/x ; leave POSIX paths alone."""
     p = p.strip().strip('"').strip("'")
@@ -57,14 +66,42 @@ def wsl_unc(p: Path) -> str:
 
 def on_wsl() -> bool:
     """True only on WSL (so we don't print Windows-isms on a native Linux box)."""
-    if os.environ.get("WSL_DISTRO_NAME"):
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        return True
+    if shutil.which("wslpath") or Path("/run/WSL").is_dir():
         return True
     try:
-        return "microsoft" in Path("/proc/version").read_text().lower()
+        return "microsoft" in Path("/proc/sys/kernel/osrelease").read_text().lower()
     except OSError:
         return False
 
 
+# ---------- prompts ----------
+def ask(msg, default=None, cast=str, ok=lambda v: True):
+    while True:
+        raw = input(f"{msg}{f' [{default}]' if default is not None else ''}: ").strip()
+        if not raw:
+            if default is not None:
+                return default
+            print("  (required)")
+            continue
+        try:
+            val = cast(raw)
+        except ValueError:
+            print(f"  not a valid {cast.__name__}")
+            continue
+        if not ok(val):
+            print("  invalid value")
+            continue
+        return val
+
+
+def ask_yes(msg, default=True):
+    raw = input(f"{msg} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
+    return default if not raw else raw.startswith("y")
+
+
+# ---------- environment ----------
 def preflight():
     """Fail early, with a clear message, if the environment isn't ready."""
     missing = []
@@ -93,134 +130,245 @@ def preflight():
         )
 
 
-def ask(msg, default=None, cast=str, ok=lambda v: True):
-    while True:
-        raw = input(f"{msg}{f' [{default}]' if default is not None else ''}: ").strip()
-        if not raw:
-            if default is not None:
-                return default
-            print("  (required)")
-            continue
-        try:
-            val = cast(raw)
-        except ValueError:
-            print(f"  not a valid {cast.__name__}")
-            continue
-        if not ok(val):
-            print("  invalid value")
-            continue
-        return val
-
-
-def ask_yes(msg, default=True):
-    raw = input(f"{msg} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
-    return default if not raw else raw.startswith("y")
-
-
-def run_step(cmd, env, cwd):
-    if subprocess.run(cmd, env=env, cwd=str(cwd)).returncode != 0:
+def run_step(cmd, cwd):
+    if subprocess.run(cmd, env=dict(os.environ), cwd=str(cwd)).returncode != 0:
         sys.exit("\nA pipeline step failed -- see the Nextflow output above.")
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Sort robot images and build root-growth videos.")
-    ap.add_argument("--images", help="Path to the images folder (Windows or WSL path).")
-    ap.add_argument("--name", help="Name for this run (a folder under ~/image-sort-runs).")
-    ap.add_argument("--overwrite", action="store_true",
-                    help="If a run with this name already exists, delete it and start fresh.")
-    ap.add_argument("--dest", help="Copy results here when done (Windows or Linux path). "
-                                   "Optional -- results always remain in the run dir too.")
-    ap.add_argument("--boxes-per-shelf", type=int)
-    ap.add_argument("--shelves", type=int)
-    ap.add_argument("--video", dest="video", action="store_true", default=None,
-                    help="Also build the stabilized video.")
-    ap.add_argument("--no-video", dest="video", action="store_false")
-    a = ap.parse_args()
-    interactive = a.images is None
-    wsl = on_wsl()
+# ---------- project helpers ----------
+def project_paths(name):
+    run_dir = (RUNS_BASE / name).resolve()
+    return run_dir, run_dir / "sorting_project"
 
-    preflight()
 
+def load_meta(run_dir):
+    f = run_dir / ".image-sort.json"
+    if f.is_file():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_meta(run_dir, meta):
+    try:
+        (run_dir / ".image-sort.json").write_text(json.dumps(meta, indent=2))
+    except OSError:
+        pass
+
+
+def stabilized_videos(sort_path):
+    d = sort_path / "data" / "videos" / "stabilized"
+    return {p.name for p in d.glob("*.mp4")} if d.is_dir() else set()
+
+
+def derive_shelves(folder_name):
+    c = folder_name[-1:]
+    return int(c) if c.isdigit() and c != "0" else None
+
+
+def nf_base(sort_path, work_dir, revision):
+    return ["nextflow", "run", PIPELINE, "-r", revision, "-latest", "-profile", "local",
+            "-work-dir", str(work_dir),
+            "--sort_path", str(sort_path),
+            "--unzip", "false", "--archive", "false"]
+
+
+def resolve_dest(a, wsl, interactive):
+    if a.dest is not None:
+        raw = a.dest
+    elif interactive:
+        hint = "Windows path, or " if wsl else ""
+        raw = input(f"Copy new videos to ({hint}Enter to keep in WSL only): ").strip()
+    else:
+        raw = ""
+    return to_path(raw, "Destination").resolve() if raw else None
+
+
+def finish_report(sort_path, before, dest, wsl):
+    """Copy newly-rendered stabilized videos to dest (if any) and print where things landed."""
+    new = sorted(stabilized_videos(sort_path) - before)
+    stab = sort_path / "data" / "videos" / "stabilized"
+    if dest and new:
+        print(f"-> Copying {len(new)} new video(s) to {win_display(dest) or dest} ...")
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+            for v in new:
+                shutil.copy2(stab / v, dest / v)
+        except (PermissionError, OSError) as e:
+            print(f"  WARNING: could not copy videos to {dest}: {e}")
+
+    print("\nDone.")
+    print(f"  Project: {sort_path.parent}")
+    if new:
+        print(f"  Finished this run: {', '.join(v[:-4] for v in new)}")
+        print(f"  Videos:  {stab}")
+    else:
+        print("  No experiments finished this run.")
+    if wsl:
+        print(f"  Open in Explorer: {wsl_unc(sort_path)}")
+    if dest:
+        print(f"  Copied new videos to: {win_display(dest) or dest}")
+
+
+# ---------- modes ----------
+def do_sort(a, wsl, interactive):
     img_prompt = "Images folder" + (" (paste the Windows C:\\ path)" if wsl else "")
     images = to_path(a.images if a.images else ask(img_prompt), "Images folder")
     if not images.is_dir():
         hint = ("\n(if this is on a network or external drive, it may not be mounted in WSL)"
                 if str(images).startswith("/mnt/") else "")
         sys.exit(f"Images folder not found: {images}{hint}")
+    source_name = images.name
 
-    boxes = a.boxes_per_shelf or ask("Boxes per shelf", default=2, cast=int, ok=lambda v: v > 0)
-    shelves = a.shelves or ask("Number of shelves", default=2, cast=int, ok=lambda v: v > 0)
-    make_video = a.video if a.video is not None else (ask_yes("Make stabilized video?") if interactive else False)
-    name = a.name or (ask("Run name", default=images.name) if interactive else images.name)
-
-    if a.dest is not None:
-        dest_raw = a.dest
-    elif interactive:
-        dest_hint = "Windows path, or " if wsl else ""
-        dest_raw = input(f"Copy results to ({dest_hint}Enter to keep here): ").strip()
-    else:
-        dest_raw = ""
-    dest = to_path(dest_raw, "Destination").resolve() if dest_raw else None
-
-    # A sort run can't ingest into an already-populated project: the pipeline does
-    # shutil.copytree(images -> unsorted_unlabeled/input1), which errors if that dir
-    # exists (container Python 3.7 has no dirs_exist_ok). So a same-name re-run would
-    # crash cryptically -- guard it: overwrite (fresh) or refuse.
-    run_dir = (RUNS_BASE / name).resolve()
-    if run_dir.exists():
-        if a.overwrite or (interactive and ask_yes(
-                f"A run named '{name}' already exists at {run_dir}.\n"
-                "  Overwrite it (delete and start fresh)?", default=False)):
-            shutil.rmtree(run_dir)
-        else:
-            sys.exit(f"Run '{name}' already exists -- pick a different --name, or pass "
-                     f"--overwrite to replace it.\n  Existing: {run_dir}")
-    sort_path = run_dir / "sorting_project"
+    project = a.project or (ask("Project name", default=source_name) if interactive else source_name)
+    run_dir, sort_path = project_paths(project)
     work_dir = run_dir / "work"
-    sort_path.mkdir(parents=True, exist_ok=True)
 
-    # Shelf-count workaround: the pipeline infers shelves from the LAST CHARACTER of the
-    # images folder name and computes num_boxes = boxes_per_shelf * shelves. We can't rename
-    # the user's folder, so we stage a symlink whose name ends in "1" and pass the *total*
-    # box count as --boxes_per_shelf. Then num_boxes = (boxes*shelves) * 1, correct for any
-    # shelf count (incl. >= 10). Removed once the run-config manifest lands.
-    staged = run_dir / "input1"
+    if a.overwrite and run_dir.exists():
+        if not interactive or ask_yes(f"Delete and recreate project at {run_dir}?", default=False):
+            shutil.rmtree(run_dir)
+
+    # Shelf count: from the folder name's last character (robot convention), or --shelves override.
+    shelves = a.shelves if a.shelves else derive_shelves(source_name)
+    if shelves is None:
+        sys.exit(f"Couldn't read the shelf count from folder name '{source_name}'.\n"
+                 "The robot names runs ending in the shelf count (e.g. ..._3).\n"
+                 "Pass --shelves N, or rename the folder.")
+    shelves = int(shelves)
+    if not (1 <= shelves <= 9):
+        sys.exit("Only 1-9 shelves are supported (it's the last character of the folder name).")
+    print(f"-> Using {shelves} shelf(s) "
+          f"({'--shelves override' if a.shelves else f'from folder name {source_name!r}'}).")
+
+    meta = load_meta(run_dir)
+    boxes = a.boxes_per_shelf or meta.get("boxes_per_shelf")
+    if not boxes:
+        boxes = ask("Boxes per shelf", default=2, cast=int, ok=lambda v: v > 0)
+    if a.stabilize is not None:
+        stabilize = a.stabilize
+    else:
+        stabilize = meta.get("stabilize", True)
+
+    sort_path.mkdir(parents=True, exist_ok=True)
+    save_meta(run_dir, {"boxes_per_shelf": boxes, "stabilize": stabilize})
+
+    # The pipeline reads shelves from the staged folder name's last char, so the staged name
+    # must end in the shelf digit. Stage under the (unique) source name when it already does;
+    # otherwise append the digit (only needed for --shelves overrides / odd folder names).
+    staged_name = source_name if source_name.endswith(str(shelves)) else f"{source_name}_{shelves}"
+    staged = run_dir / staged_name
     if staged.is_symlink() or staged.exists():
         staged.unlink()
     staged.symlink_to(images, target_is_directory=True)
-    total_boxes = boxes * shelves
 
-    base = ["nextflow", "run", PIPELINE, "-r", REVISION, "-profile", "local",
-            "-work-dir", str(work_dir),
-            "--images_path", str(staged),
-            "--sort_path", str(sort_path),
-            "--boxes_per_shelf", str(total_boxes),
-            "--unzip", "false", "--archive", "false"]
-    env = dict(os.environ)
+    # Defensive: clear transient ingest residue left by an interrupted prior run with this name
+    # (the pipeline's copytree into unsorted_unlabeled/<name> errors if it already exists).
+    for sub in ("unsorted_unlabeled", "sorted_unlabeled"):
+        leftover = sort_path / "data" / "master_data" / sub / staged_name
+        if leftover.exists():
+            shutil.rmtree(leftover, ignore_errors=True)
 
-    print(f"\n-> Sorting {images.name}  ({boxes} boxes x {shelves} shelves = {total_boxes} positions)...")
-    run_step(base, env, run_dir)
-    if make_video:
-        print("-> Rendering video...")
-        run_step(base + ["--finish_only", "true"], env, run_dir)
+    before = stabilized_videos(sort_path)
+    cmd = nf_base(sort_path, work_dir, a.revision) + [
+        "--images_path", str(staged),
+        "--boxes_per_shelf", str(boxes),
+        "--stabilize", "true" if stabilize else "false",
+    ]
+    print(f"\n-> Sorting {source_name} into project '{run_dir.name}'  "
+          f"({boxes} boxes x {shelves} shelves)...")
+    run_step(cmd, run_dir)
 
-    if dest:
-        print(f"-> Copying results to {win_display(dest) or dest} ...")
-        try:
-            dest.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(sort_path, dest, dirs_exist_ok=True)
-        except (PermissionError, OSError) as e:
-            sys.exit(f"\nCould not write results to {dest}:\n  {e}\n"
-                     f"The sorted output is still in WSL at:\n  {sort_path}")
+    dest = resolve_dest(a, wsl, interactive)
+    finish_report(sort_path, before, dest, wsl)
 
-    print("\nDone. Results:")
-    print(f"  Output: {sort_path}")
-    if make_video:
-        print(f"  Video:  {sort_path / 'data' / 'videos' / 'stabilized'}")
-    if wsl:
-        print(f"  Open in Explorer: {wsl_unc(sort_path)}")
-    if dest:
-        print(f"  Copied to: {win_display(dest) or dest}")
+
+def do_finish(a, wsl, interactive, mode):
+    project = a.project or ask("Project name")
+    run_dir, sort_path = project_paths(project)
+    work_dir = run_dir / "work"
+    if not sort_path.is_dir():
+        sys.exit(f"Project '{project}' not found at {run_dir}. Sort a run into it first.")
+
+    meta = load_meta(run_dir)
+    boxes = a.boxes_per_shelf or meta.get("boxes_per_shelf") or 1  # placeholder; not used to sort
+    stabilize = a.stabilize if a.stabilize is not None else meta.get("stabilize", True)
+
+    # The finish branch ignores images, but the pipeline still stages an images path -> give it
+    # a harmless empty placeholder.
+    placeholder = run_dir / "_finish_placeholder"
+    placeholder.mkdir(parents=True, exist_ok=True)
+
+    cmd = nf_base(sort_path, work_dir, a.revision) + [
+        "--images_path", str(placeholder),
+        "--boxes_per_shelf", str(boxes),
+        "--stabilize", "true" if stabilize else "false",
+    ]
+
+    if mode == "finish":
+        raw = a.exp or ask("Experiment number(s) to finish (comma-separated)")
+        exps = ",".join(e.strip() for e in raw.split(",") if e.strip())
+        if not exps:
+            sys.exit("No experiment numbers given.")
+        cmd += ["--finish_experiments", exps]
+        print(f"\n-> Finishing experiment(s) {exps} in project '{run_dir.name}'...")
+    else:  # finish-all
+        if interactive and not ask_yes(
+                f"Finish ALL experiments in '{run_dir.name}' and turn it over?", default=False):
+            sys.exit("Cancelled.")
+        cmd += ["--finish_only", "true"]
+        print(f"\n-> Finishing ALL experiments in project '{run_dir.name}' (turning it over)...")
+
+    before = stabilized_videos(sort_path)
+    run_step(cmd, run_dir)
+    dest = resolve_dest(a, wsl, interactive)
+    finish_report(sort_path, before, dest, wsl)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Sort robot images and build root-growth videos.")
+    ap.add_argument("--mode", choices=["sort", "finish", "finish-all"],
+                    help="What to do (default: inferred -- sort if --images, finish if --exp).")
+    ap.add_argument("--project", help="Project name (folder under ~/image-sort-runs).")
+    ap.add_argument("--images", help="[sort] Images folder for this run (Windows or WSL path).")
+    ap.add_argument("--exp", help="[finish] Experiment number(s) to finalize, comma-separated.")
+    ap.add_argument("--boxes-per-shelf", type=int, help="[sort] Boxes per shelf (remembered per project).")
+    ap.add_argument("--shelves", type=int, help="[sort] Override shelf count (normally read from the folder name).")
+    ap.add_argument("--dest", help="Copy newly-finished videos here (Windows or Linux path). Optional.")
+    ap.add_argument("--stabilize", dest="stabilize", action="store_true", default=None,
+                    help="Stabilize videos (default).")
+    ap.add_argument("--no-stabilize", dest="stabilize", action="store_false",
+                    help="Skip stabilization.")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="[sort] Delete and recreate the project before sorting.")
+    ap.add_argument("--revision", default=REVISION, help="Pipeline git revision to run (advanced).")
+    a = ap.parse_args()
+
+    preflight()
+    wsl = on_wsl()
+    interactive = sys.stdin.isatty()
+
+    mode = a.mode
+    if mode is None:
+        if a.exp is not None:
+            mode = "finish"
+        elif a.images is not None:
+            mode = "sort"
+        elif interactive:
+            print("What would you like to do?")
+            print("  1) Sort a new run into a project")
+            print("  2) Finish specific experiments (make videos)")
+            print("  3) Finish all experiments (turn over the project)")
+            mode = {"1": "sort", "2": "finish", "3": "finish-all"}[
+                ask("Choose", default="1", ok=lambda v: v in ("1", "2", "3"))]
+        else:
+            sys.exit("Nothing to do. Pass --mode sort|finish|finish-all (or --images / --exp).")
+
+    if mode == "sort":
+        do_sort(a, wsl, interactive)
+    else:
+        do_finish(a, wsl, interactive, mode)
 
 
 if __name__ == "__main__":

@@ -41,23 +41,31 @@ current shell, so `image-sort` works immediately — no need to reopen Ubuntu.
 image-sort
 ```
 
-It asks for the images folder (paste the Windows `C:\…` path — it converts it for you), boxes
-per shelf, number of shelves, whether to build the video, and — optionally — a folder to copy
-the results to (paste a Windows `C:\…` path to get them back on your desktop; press Enter to
-leave them in WSL only). It then sorts, labels, and optionally renders the stabilized video.
-The run is processed on fast Linux storage under `~/image-sort-runs/<name>/`; it prints the
-`\\wsl.localhost\…` path so you can open the results in File Explorer, and copies them to your
-chosen `--dest` if you gave one.
+With no arguments `image-sort` shows a short menu — **1) Sort a run into a project ·
+2) Finish specific experiments · 3) Finish all (turn over)** — then asks only what that action
+needs. A **project** is a named workspace you feed runs into over time. For a *sort* it asks for
+the images folder (paste the Windows `C:\…` path — it converts it for you), the project to add
+the run to, boxes-per-shelf (remembered after the first run), and — optionally — a `C:\…` folder
+to copy finished videos to. The **number of shelves is read automatically from the run-folder
+name** (the robot names runs ending in the shelf count, e.g. `20260613_120000_3`).
 
-Before it starts, it checks that Nextflow, Java, and a running Docker engine are present, and
-tells you exactly what's missing if not.
+Runs accumulate in the project's `current_exp/`; each experiment's **stabilized video is rendered
+automatically once a later run adds nothing to it** (the experiment is done), or immediately via
+the Finish actions. Processing happens on fast Linux storage under `~/image-sort-runs/<project>/`;
+it prints the `\\wsl.localhost\…` path and copies any newly-finished videos to your `--dest`.
+Before starting it checks Nextflow, Java, and a running Docker engine, and tells you what's missing.
 
 Prefer flags (scriptable)?
 
 ```bash
-image-sort --images 'C:\Users\you\Desktop\run_7_7' --name run_7_7 \
-  --boxes-per-shelf 2 --shelves 2 --video \
-  --dest 'C:\Users\you\Desktop\run_7_7_results'
+# sort a run into a project (shelves read from the folder name)
+image-sort --mode sort --project barley_2026 \
+  --images 'C:\Users\you\Desktop\20260613_120000_3' \
+  --boxes-per-shelf 2 --dest 'C:\Users\you\Desktop\barley_videos'
+
+# later: finish specific experiments, or turn the whole project over
+image-sort --mode finish     --project barley_2026 --exp 100001,100002 --dest 'C:\Users\you\Desktop\barley_videos'
+image-sort --mode finish-all --project barley_2026                     --dest 'C:\Users\you\Desktop\barley_videos'
 ```
 
 > **First time on this machine?** Do the one-time
@@ -339,36 +347,33 @@ On **Windows**, a local clone needs LF line endings on the `bin/` scripts or it 
 `python3\r` error above — add a `.gitattributes` forcing `*.py`/`*.sh` to `eol=lf`, or
 strip CRs from `bin/` before running. Running from GitHub avoids this entirely.
 
-### Producing videos: the two-phase workflow
+### Finishing experiments and videos
 
-Sorting a run does **not** by itself produce a video. The pipeline only renders a video
-once an experiment is considered **finished**, and it detects "finished" as *a run that
-adds **no new images** to an already-existing experiment* (i.e. the robot has stopped
-imaging it). So a brand-new experiment created by its first sorting run has no video yet
-— that's expected, not a failure.
+Sorting a run does **not** by itself produce a video. The pipeline renders an experiment's
+video only when that experiment is **finished**, defined as *a run that adds **no new images**
+to an already-existing experiment* (the robot has stopped imaging it). So a brand-new experiment
+has no video after its first run — expected, not a failure. Across many real runs each experiment
+finishes (and gets its stabilized video) **on its own**, on the first run that doesn't add to it;
+no extra step is needed in normal operation.
 
-To finalize one or more batches and render their videos, run a second pass with
-**`--finish_only true`** against the **same `--sort_path`**:
+To finalize on demand there are two modes (the `image-sort` launcher exposes these as the
+**Finish specific** and **Finish all** menu items):
 
 ```bash
-# 1) Sort a run (creates / grows experiments under current_exp/)
+# Finish ALL experiments currently in current_exp/ (turn the project over)
 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
-  --images_path /mnt/c/Users/you/Desktop/run_7_7 \
-  --sort_path   /home/you/sorting_project \
-  --boxes_per_shelf 3 --unzip false --archive false
+  --images_path /home/you/sorting_project --sort_path /home/you/sorting_project \
+  --boxes_per_shelf 2 --finish_only true --unzip false --archive false
 
-# 2) Finish: move current_exp/ -> finished_exp/ and render the (stabilized) videos
+# Finish specific experiments by number (comma-separated)
 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
-  --images_path /mnt/c/Users/you/Desktop/run_7_7 \
-  --sort_path   /home/you/sorting_project \
-  --boxes_per_shelf 3 --finish_only true --unzip false --archive false
+  --images_path /home/you/sorting_project --sort_path /home/you/sorting_project \
+  --boxes_per_shelf 2 --finish_experiments '100001,100002' --unzip false --archive false
 ```
 
-`--finish_only` skips ingest/sort and just finalizes whatever sits in `current_exp/`,
-writing `<exp>.mp4` to both `data/videos/unstabilized/` and (by default)
-`data/videos/stabilized/`. In normal operation across many robot runs this happens on
-its own — an experiment finishes the first run after imaging stops — and `--finish_only`
-is the manual way to force it for a one-off batch.
+Both skip ingest/sort and write `<exp>.mp4` to `data/videos/unstabilized/` and (by default)
+`data/videos/stabilized/`. `--images_path` is unused by these modes but the pipeline still
+requires a path — point it at any existing directory.
 
 ### Parameters
 
@@ -379,7 +384,8 @@ is the manual way to force it for a one-off batch.
 | `--boxes_per_shelf` | `3` | Containers per shelf, used to sort frames into experiments. |
 | `--unzip` | `true` | Treat `images_path` as a zip and unzip it first. Set `false` for a plain folder. |
 | `--stabilize` | `true` | Stabilize the generated time-lapse videos. |
-| `--finish_only` | `false` | Skip ingest/sort; only finalize existing experiments and (re)build videos. |
+| `--finish_only` | `false` | Skip ingest/sort; finalize **all** experiments in `current_exp/` and (re)build videos. |
+| `--finish_experiments` | `""` | Skip ingest/sort; finalize only the comma-separated experiment numbers (e.g. `100001,100002`). |
 | `--archive` | `true` | On success, move the consumed raw run into `data/unsorted_unlabeled_processed/`. |
 
 > ⚠️ **Number of shelves is currently encoded in the input folder name.** There is no
@@ -543,8 +549,8 @@ This pipeline is part of the Rhizodynamics Robot. If you use it, please cite:
 
 **Validated end-to-end on Windows 10 (WSL2 + Docker CE).** On a Lenovo ThinkCentre test
 machine the full path is confirmed working: `wsl --install -d Ubuntu`, Docker CE under
-systemd, and a complete pipeline run that pulled the `file-sorting-env` container, sorted
-and labeled a real image set, and — via the `--finish_only` pass — produced both
-unstabilized and stabilized `.mp4` videos. The run was launched **from GitHub** (LF line
-endings, as documented above). `main.nf` uses the strict "Nextflow language" syntax and
-parses on current Nextflow (25.x / 26.x) with no version pin.
+systemd, and complete `image-sort` runs that pulled the `file-sorting-env` container, sorted
+and labeled a real image set across multiple runs into one project, and produced stabilized
+`.mp4` videos via natural finishing, the **Finish specific** mode, and the **Finish all** mode.
+Runs are launched **from GitHub** (LF line endings, as documented above). `main.nf` uses the
+strict "Nextflow language" syntax and parses on current Nextflow (25.x / 26.x) with no version pin.

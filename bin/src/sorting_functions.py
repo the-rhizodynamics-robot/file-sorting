@@ -348,6 +348,48 @@ def final_transfer(current_exp_list, stabilize = True):
                 print("Video processing time: ", time.time() - start)            
         
 
+def finish_experiments(exp_list, stabilize = True):
+    """ Explicitly finalize the named experiments: move each from current_exp to finished_exp
+        and render its video(s), regardless of whether new images were added this run. Names
+        not present in current_exp are skipped with a warning. This mirrors the move+video
+        logic in final_transfer(); final_transfer() applies it automatically to experiments
+        that went static, this applies it on demand to a caller-supplied list. """
+    present = set(listdir_nohidden(CURRENT_EXP_PATH))
+    for exp_name in exp_list:
+        if exp_name not in present:
+            print("WARNING: experiment " + str(exp_name) + " not found in current_exp; skipping")
+            continue
+        print("Finishing experiment " + str(exp_name) + ", moving to finished_exp")
+        try:
+            shutil.move(CURRENT_EXP_PATH + exp_name, FINISHED_EXP_PATH)
+        except FileExistsError as e:
+            print("WARNING: Experiment " + str(exp_name) + " already has a finished experiment folder")
+            print(e)
+        except Exception as e:
+            print(e)
+
+        start = time.time()
+        src = FINISHED_EXP_PATH + exp_name + "/"
+        os.chdir(src)
+        command = 'ffmpeg -framerate 15 -pattern_type glob -i \"*.png\" -c:v libx264 -crf 24 -pix_fmt yuv420p outfile.mp4'
+        subprocess.call(command, shell=True)
+
+        if stabilize:
+            command = 'ffmpeg -i outfile.mp4 -vf vidstabdetect=stepsize=32:shakiness=10:accuracy=10:result=transforms.trf -f null -'
+            subprocess.call(command, shell=True)
+            command = 'ffmpeg -i outfile.mp4 -vf vidstabtransform=smoothing:input=\"transforms.trf\" outfile_stabilized.mp4'
+            subprocess.call(command, shell=True)
+            shutil.copy(FINISHED_EXP_PATH + exp_name + "/outfile_stabilized.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
+            os.remove(FINISHED_EXP_PATH + exp_name + "/outfile_stabilized.mp4")
+            os.remove(FINISHED_EXP_PATH + exp_name + "/transforms.trf")
+        else:
+            shutil.copy(FINISHED_EXP_PATH + exp_name + "/outfile.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
+
+        shutil.copy(FINISHED_EXP_PATH + exp_name + "/outfile.mp4", FINAL_VIDEO_PATH + exp_name + ".mp4")
+        os.remove(FINISHED_EXP_PATH + exp_name + "/outfile.mp4")
+        print("Video processing time: ", time.time() - start)
+
+
 def clear_junk():
     """ Clears out junk review and junk experiment folders """
     junk_exp_path = JUNK_EXP_PATH

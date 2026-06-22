@@ -7,6 +7,7 @@ params.finish_only = false
 params.stabilize = true
 params.unzip = true
 params.archive = true
+params.finish_experiments = ""
 
 // Interpret boolean params robustly. On the command line, `--unzip false` arrives
 // as the STRING "false", which is truthy in Groovy -- so a plain `params.unzip ?`
@@ -31,7 +32,8 @@ process file_sorting {
         --boxes_per_shelf ${params.boxes_per_shelf} \
         ${asBool(params.finish_only) ? '--finish_only' : ''} \
         ${asBool(params.stabilize) ? '--stabilize' : ''} \
-        ${asBool(params.unzip) ? '--unzip' : ''}
+        ${asBool(params.unzip) ? '--unzip' : ''} \
+        ${params.finish_experiments ? "--finish_experiments '" + params.finish_experiments + "'" : ''}
     """
 }
 

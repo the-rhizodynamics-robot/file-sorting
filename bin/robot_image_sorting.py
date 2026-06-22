@@ -44,6 +44,12 @@ parser.add_argument("-s", "--stabilize",
 parser.add_argument("-u", "--unzip",
                     help="Unzip the images",
                     action="store_true")
+parser.add_argument("-e", "--finish_experiments",
+                    action="store",
+                    dest="finish_experiments",
+                    default="",
+                    help="Comma-separated experiment numbers to finalize now "
+                         "(move to finished_exp and make videos), regardless of new images.")
 args = parser.parse_args()
 
 # Override paths with sort_path
@@ -79,9 +85,12 @@ sf.clear_junk()
 
 current_exp_list = []
 
-if args.finish_only:
+if args.finish_experiments:
+    exp_list = [e.strip() for e in args.finish_experiments.split(",") if e.strip()]
+    sf.finish_experiments(exp_list, stabilize = args.stabilize)
+elif args.finish_only:
     current_exp_list = sf.update(current_exp_list)
-    sf.final_transfer(current_exp_list)
+    sf.final_transfer(current_exp_list, stabilize = args.stabilize)
 else:
 
     # move images to unsorted_unlabeled
