@@ -12,9 +12,9 @@ Modes:
   finish      Finalize specific experiment number(s) now (move to finished + video).
   finish-all  Finalize everything currently in the project (turn it over).
 
-Shelf count comes from the LAST CHARACTER of the run folder's name (the robot names
-runs ending in the shelf count, e.g. 20260613_120000_3) -- so you don't enter it.
-Use --shelves to override for ad-hoc folders.
+Shelf count comes from the number after the final underscore in the run folder's name
+(the robot names runs <timestamp>_<shelves>, e.g. 20260613_120000_3) -- so you don't
+enter it. Use --shelves to override for ad-hoc folders.
 
 Stdlib only -- nothing to pip-install. Install with one curl line (see README).
 """
@@ -164,8 +164,9 @@ def stabilized_videos(sort_path):
 
 
 def derive_shelves(folder_name):
-    c = folder_name[-1:]
-    return int(c) if c.isdigit() and c != "0" else None
+    """Shelf count = the number after the final underscore (robot names runs <timestamp>_<n>)."""
+    seg = folder_name.rsplit("_", 1)[-1]
+    return int(seg) if seg.isdigit() else None
 
 
 def nf_base(sort_path, work_dir, revision):
@@ -230,15 +231,17 @@ def do_sort(a, wsl, interactive):
         if not interactive or ask_yes(f"Delete and recreate project at {run_dir}?", default=False):
             shutil.rmtree(run_dir)
 
-    # Shelf count: from the folder name's last character (robot convention), or --shelves override.
+    # Shelf count: the number after the final '_' in the folder name (robot convention:
+    # <timestamp>_<shelves>), or the --shelves override.
     shelves = a.shelves if a.shelves else derive_shelves(source_name)
     if shelves is None:
         sys.exit(f"Couldn't read the shelf count from folder name '{source_name}'.\n"
-                 "The robot names runs ending in the shelf count (e.g. ..._3).\n"
+                 "The robot names runs ending in _<shelves> (e.g. 20260613_120000_3).\n"
                  "Pass --shelves N, or rename the folder.")
     shelves = int(shelves)
-    if not (1 <= shelves <= 9):
-        sys.exit("Only 1-9 shelves are supported (it's the last character of the folder name).")
+    if not (1 <= shelves <= 99):
+        sys.exit(f"Implausible shelf count ({shelves}) read from '{source_name}'.\n"
+                 "If the folder name's trailing _<n> isn't the shelf count, pass --shelves N.")
     print(f"-> Using {shelves} shelf(s) "
           f"({'--shelves override' if a.shelves else f'from folder name {source_name!r}'}).")
 
@@ -254,10 +257,10 @@ def do_sort(a, wsl, interactive):
     sort_path.mkdir(parents=True, exist_ok=True)
     save_meta(run_dir, {"boxes_per_shelf": boxes, "stabilize": stabilize})
 
-    # The pipeline reads shelves from the staged folder name's last char, so the staged name
-    # must end in the shelf digit. Stage under the (unique) source name when it already does;
-    # otherwise append the digit (only needed for --shelves overrides / odd folder names).
-    staged_name = source_name if source_name.endswith(str(shelves)) else f"{source_name}_{shelves}"
+    # The pipeline reads shelves from the segment after the final '_' in the staged folder name,
+    # so the staged name must end in '_<shelves>'. Robot folders already do; otherwise append it
+    # (only needed for --shelves overrides / non-conventional folder names).
+    staged_name = source_name if source_name.rsplit("_", 1)[-1] == str(shelves) else f"{source_name}_{shelves}"
     staged = run_dir / staged_name
     if staged.is_symlink() or staged.exists():
         staged.unlink()

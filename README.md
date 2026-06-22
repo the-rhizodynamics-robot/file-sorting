@@ -388,13 +388,13 @@ requires a path — point it at any existing directory.
 | `--finish_experiments` | `""` | Skip ingest/sort; finalize only the comma-separated experiment numbers (e.g. `100001,100002`). |
 | `--archive` | `true` | On success, move the consumed raw run into `data/unsorted_unlabeled_processed/`. |
 
-> ⚠️ **Number of shelves is currently encoded in the input folder name.** There is no
-> `--num_shelves` parameter (yet). The sorter reads the **last character** of the
-> `images_path` name as the shelf count, e.g. `…/20260613_test2` → **2 shelves**. This
-> means the folder name **must end in the shelf-count digit**, and the scheme only works
-> for **1–9 shelves** — a name ending in a non-digit crashes, and ≥10 shelves
-> mis-parses (ends in `0` → divide-by-zero; `11`/`12`/… → reads only the last digit).
-> See [Roadmap](#roadmap) for the planned fix.
+> ⚠️ **Number of shelves is encoded in the input folder name.** There is no
+> `--num_shelves` parameter (yet). The sorter reads the **number after the final
+> underscore** of the `images_path` name as the shelf count, e.g.
+> `…/20260613_120000_3` → **3 shelves** (the robot names runs `<timestamp>_<shelves>`).
+> So the folder name **must end in `_<shelves>`**; a name whose final `_`-segment isn't
+> a number is rejected (use `--shelves N` via the `image-sort` launcher to override).
+> Multi-digit counts work. See [Roadmap](#roadmap) for the longer-term manifest plan.
 
 ---
 
@@ -449,8 +449,9 @@ builds and pushes a new `:latest` (and a SHA-tagged) image to GHCR.
 **Motivation.** The number of shelves is a *per-experiment* choice — an operator with
 only a few samples may image a single shelf and skip the empty ones — so it can't be
 inferred from the rig or reconstructed from memory weeks later. Today it survives only as
-the last character of the input folder name, which is fragile (see the warning above) and
-breaks for ≥10 shelves.
+the number after the final underscore of the input folder name (`<timestamp>_<shelves>`),
+which works (including multi-digit counts) but is still implicit — not validated or
+self-describing, and dependent on the capture side naming runs correctly.
 
 **Plan.** Persist the run configuration *at capture time* and have this pipeline read it:
 
@@ -469,9 +470,9 @@ breaks for ≥10 shelves.
    stray file) can sit alongside the images without breaking the FlyCap filename parser.
 
 **Result.** Each run becomes self-describing and reproducible; shelf count is carried by
-the data, the ≥10-shelf bug disappears, and the per-experiment variable-shelf feature is
-unlocked. This spans both repos: capture writes the manifest (robot-control), processing
-consumes it (file-sorting).
+the data (validated, not inferred from a folder name), and the per-experiment variable-shelf
+feature is unlocked. This spans both repos: capture writes the manifest (robot-control),
+processing consumes it (file-sorting).
 
 ### Generalize image ingestion (don't assume FlyCap filenames)
 

@@ -98,7 +98,7 @@ else:
 
     current_exp_list = sf.update(current_exp_list)
     run_name = os.path.splitext(images_path)[0]
-    sf.sort(run_name, run_name[-1:])
+    sf.sort(run_name, run_name.rsplit('_', 1)[-1])
     sf.label(run_name)    
 
     review_needed = sf.junk_review()
