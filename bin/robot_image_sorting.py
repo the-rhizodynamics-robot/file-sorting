@@ -55,8 +55,27 @@ args = parser.parse_args()
 # Override paths with sort_path
 images_path = args.images_path
 sort_path = args.sort_path
-boxes_per_shelf = args.boxes_per_shelf
 model_path = args.model_path
+
+
+def parse_geometry(name):
+    """Imaging geometry from a run-folder name '<timestamp>_<shelves>_<boxes>'.
+
+    The robot encodes both: the number after the final underscore is boxes-per-shelf,
+    the one before it is the shelf count. Returns (shelves, boxes) as strings, or
+    (None, None) when the name doesn't carry both (e.g. the older single-suffix
+    '<timestamp>_<shelves>' convention, or an ad-hoc folder).
+    """
+    parts = os.path.basename(name).rsplit('_', 2)
+    if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
+        return parts[1], parts[2]
+    return None, None
+
+
+# Geometry from the folder name wins; fall back to --boxes_per_shelf for shelf count
+# is handled below in the sort branch (the older '<timestamp>_<shelves>' convention).
+name_shelves, name_boxes = parse_geometry(os.path.splitext(images_path)[0])
+boxes_per_shelf = name_boxes if name_boxes is not None else args.boxes_per_shelf
 
 sf.init(boxes_per_shelf, sort_path, images_path, model_path)
 
@@ -98,8 +117,9 @@ else:
 
     current_exp_list = sf.update(current_exp_list)
     run_name = os.path.splitext(images_path)[0]
-    sf.sort(run_name, run_name.rsplit('_', 1)[-1])
-    sf.label(run_name)    
+    shelves = name_shelves if name_shelves is not None else run_name.rsplit('_', 1)[-1]
+    sf.sort(run_name, shelves)
+    sf.label(run_name)
 
     review_needed = sf.junk_review()
 

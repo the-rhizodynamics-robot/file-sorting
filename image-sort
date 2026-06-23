@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """image-sort -- friendly launcher for the file-sorting Nextflow pipeline.
 
-Project-centric: feed many robot runs into one named project. Experiments accumulate
-in the project and finish (move to finished_exp + stabilized video) automatically when
-a sort run adds no new images to them. You can also finish specific experiments, or
-finish everything ("turn over"), on demand.
+One persistent location: point every run at the same output location (--out) and the
+pipeline accumulates everything there. That location holds just two trees --
+data/master_data (experiments) and data/videos (finished stabilized videos). Experiments
+finish (move to finished_exp + stabilized video) automatically when a later run adds no
+new images to them; you can also finish specific experiments, or finish everything, on
+demand.
 
 Modes:
-  sort        Sort a run's images into a project (default). Videos appear on their own
+  sort        Sort a run's images into the location (default). Videos appear on their own
               as experiments go static across runs.
   finish      Finalize specific experiment number(s) now (move to finished + video).
-  finish-all  Finalize everything currently in the project (turn it over).
+  finish-all  Finalize everything currently in the location (turn it over).
 
-Shelf count comes from the number after the final underscore in the run folder's name
-(the robot names runs <timestamp>_<shelves>, e.g. 20260613_120000_3) -- so you don't
-enter it. Use --shelves to override for ad-hoc folders.
+Imaging geometry comes from the run folder's name: the robot names runs
+<timestamp>_<shelves>_<boxes> (e.g. 20260613120000_3_8), so the shelf count and
+boxes-per-shelf are both read from it -- you don't enter them. Use --shelves /
+--boxes-per-shelf to override for ad-hoc folders.
 
-Stdlib only -- nothing to pip-install. Install with one curl line (see README).
+Transient working files (Nextflow work dir, run staging) live under ~/.cache/image-sort,
+never in your output location. Stdlib only -- nothing to pip-install (see README to install).
 """
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -28,7 +33,7 @@ from pathlib import Path
 
 PIPELINE = "the-rhizodynamics-robot/file-sorting"
 REVISION = "main"
-RUNS_BASE = Path.home() / "image-sort-runs"
+CACHE = Path.home() / ".cache" / "image-sort"
 
 
 # ---------- path helpers ----------
@@ -135,14 +140,24 @@ def run_step(cmd, cwd):
         sys.exit("\nA pipeline step failed -- see the Nextflow output above.")
 
 
-# ---------- project helpers ----------
-def project_paths(name):
-    run_dir = (RUNS_BASE / name).resolve()
-    return run_dir, run_dir / "sorting_project"
+# ---------- cache / store helpers ----------
+# The output location (--out) holds ONLY data/. All transient bits -- the Nextflow work
+# dir, the run-staging symlink, the finish placeholder, and the small per-location memory
+# (boxes-per-shelf / stabilize / last-used) -- live under ~/.cache/image-sort instead.
+def cache_subdir(*parts):
+    d = CACHE.joinpath(*parts)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
-def load_meta(run_dir):
-    f = run_dir / ".image-sort.json"
+def work_dir_for(store):
+    """Nextflow work dir for a location, kept OUT of it (transient, resumable)."""
+    tag = hashlib.sha1(str(store).encode()).hexdigest()[:12]
+    return cache_subdir("work", tag)
+
+
+def _read_all_meta():
+    f = CACHE / "stores.json"
     if f.is_file():
         try:
             return json.loads(f.read_text())
@@ -151,11 +166,44 @@ def load_meta(run_dir):
     return {}
 
 
-def save_meta(run_dir, meta):
+def _write_all_meta(data):
     try:
-        (run_dir / ".image-sort.json").write_text(json.dumps(meta, indent=2))
+        CACHE.mkdir(parents=True, exist_ok=True)
+        (CACHE / "stores.json").write_text(json.dumps(data, indent=2))
     except OSError:
         pass
+
+
+def load_meta(store):
+    return _read_all_meta().get("stores", {}).get(str(store), {})
+
+
+def save_meta(store, meta):
+    data = _read_all_meta()
+    data.setdefault("stores", {})[str(store)] = meta
+    data["last"] = str(store)
+    _write_all_meta(data)
+
+
+def last_store():
+    return _read_all_meta().get("last")
+
+
+def resolve_store(a, interactive):
+    """The persistent output location (== --sort_path). Same path every time -> accumulates."""
+    raw = a.out
+    if not raw:
+        if not interactive:
+            sys.exit("No output location given. Pass --out <path> -- the persistent location "
+                     "that holds data/master_data + data/videos.")
+        prompt = "Output location (holds data/master_data + data/videos)"
+        default = last_store()
+        raw = ask(prompt, default=default) if default else ask(prompt)
+    store = to_path(raw, "Output location").resolve()
+    data = _read_all_meta()
+    data["last"] = str(store)
+    _write_all_meta(data)
+    return store
 
 
 def stabilized_videos(sort_path):
@@ -163,10 +211,18 @@ def stabilized_videos(sort_path):
     return {p.name for p in d.glob("*.mp4")} if d.is_dir() else set()
 
 
-def derive_shelves(folder_name):
-    """Shelf count = the number after the final underscore (robot names runs <timestamp>_<n>)."""
-    seg = folder_name.rsplit("_", 1)[-1]
-    return int(seg) if seg.isdigit() else None
+def derive_geometry(folder_name):
+    """(shelves, boxes) from a run-folder name '<timestamp>_<shelves>_<boxes>'.
+
+    The robot encodes both: number after the final underscore is boxes-per-shelf, the one
+    before it is the shelf count. Returns ints, or (None, None) if the name doesn't carry
+    both (older '<timestamp>_<shelves>' folders, or ad-hoc names -- use --shelves /
+    --boxes-per-shelf then).
+    """
+    parts = folder_name.rsplit("_", 2)
+    if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
+        return int(parts[1]), int(parts[2])
+    return None, None
 
 
 def nf_base(sort_path, work_dir, revision, archive=False):
@@ -201,7 +257,7 @@ def finish_report(sort_path, before, dest, wsl):
             print(f"  WARNING: could not copy videos to {dest}: {e}")
 
     print("\nDone.")
-    print(f"  Project: {sort_path.parent}")
+    print(f"  Location: {win_display(sort_path) or sort_path}")
     if new:
         print(f"  Finished this run: {', '.join(v[:-4] for v in new)}")
         print(f"  Videos:  {stab}")
@@ -223,45 +279,56 @@ def do_sort(a, wsl, interactive):
         sys.exit(f"Images folder not found: {images}{hint}")
     source_name = images.name
 
-    project = a.project or (ask("Project name", default=source_name) if interactive else source_name)
-    run_dir, sort_path = project_paths(project)
-    work_dir = run_dir / "work"
+    store = resolve_store(a, interactive)
+    work_dir = work_dir_for(store)
 
-    if a.overwrite and run_dir.exists():
-        if not interactive or ask_yes(f"Delete and recreate project at {run_dir}?", default=False):
-            shutil.rmtree(run_dir)
+    if a.overwrite and store.exists():
+        if not interactive or ask_yes(
+                f"Delete and recreate the ENTIRE location at {win_display(store) or store} "
+                "(wipes all experiments)?", default=False):
+            shutil.rmtree(store)
 
-    # Shelf count: the number after the final '_' in the folder name (robot convention:
-    # <timestamp>_<shelves>), or the --shelves override.
-    shelves = a.shelves if a.shelves else derive_shelves(source_name)
+    # Imaging geometry: the robot encodes it in the folder name as
+    # <timestamp>_<shelves>_<boxes> (boxes = the final segment, shelves the one before it).
+    # --shelves / --boxes-per-shelf override; remembered boxes (per location) is a fallback.
+    name_shelves, name_boxes = derive_geometry(source_name)
+    meta = load_meta(store)
+
+    shelves = a.shelves if a.shelves else name_shelves
     if shelves is None:
         sys.exit(f"Couldn't read the shelf count from folder name '{source_name}'.\n"
-                 "The robot names runs ending in _<shelves> (e.g. 20260613_120000_3).\n"
-                 "Pass --shelves N, or rename the folder.")
+                 "The robot names runs <timestamp>_<shelves>_<boxes> (e.g. 20260613120000_3_8).\n"
+                 "Pass --shelves N (and --boxes-per-shelf N), or rename the folder.")
     shelves = int(shelves)
     if not (1 <= shelves <= 99):
         sys.exit(f"Implausible shelf count ({shelves}) read from '{source_name}'.\n"
-                 "If the folder name's trailing _<n> isn't the shelf count, pass --shelves N.")
-    print(f"-> Using {shelves} shelf(s) "
-          f"({'--shelves override' if a.shelves else f'from folder name {source_name!r}'}).")
+                 "If the folder name's trailing _<shelves>_<boxes> is wrong, pass --shelves N.")
 
-    meta = load_meta(run_dir)
-    boxes = a.boxes_per_shelf or meta.get("boxes_per_shelf")
+    boxes = a.boxes_per_shelf or name_boxes or meta.get("boxes_per_shelf")
     if not boxes:
         boxes = ask("Boxes per shelf", default=2, cast=int, ok=lambda v: v > 0)
+    boxes = int(boxes)
+
+    shelf_src = ("--shelves override" if a.shelves
+                 else f"from folder name {source_name!r}" if name_shelves else "fallback")
+    box_src = ("--boxes-per-shelf override" if a.boxes_per_shelf
+               else "from folder name" if name_boxes else "remembered/asked")
+    print(f"-> Using {shelves} shelf(s) ({shelf_src}) x {boxes} box(es)/shelf ({box_src}).")
     if a.stabilize is not None:
         stabilize = a.stabilize
     else:
         stabilize = meta.get("stabilize", True)
 
-    sort_path.mkdir(parents=True, exist_ok=True)
-    save_meta(run_dir, {"boxes_per_shelf": boxes, "stabilize": stabilize})
+    store.mkdir(parents=True, exist_ok=True)
+    save_meta(store, {"boxes_per_shelf": boxes, "stabilize": stabilize})
 
-    # The pipeline reads shelves from the segment after the final '_' in the staged folder name,
-    # so the staged name must end in '_<shelves>'. Robot folders already do; otherwise append it
-    # (only needed for --shelves overrides / non-conventional folder names).
-    staged_name = source_name if source_name.rsplit("_", 1)[-1] == str(shelves) else f"{source_name}_{shelves}"
-    staged = run_dir / staged_name
+    # The pipeline reads geometry from the staged folder name, so it must end in
+    # '_<shelves>_<boxes>'. Robot folders already do; otherwise append it (needed for
+    # --shelves/--boxes-per-shelf overrides / non-conventional names). Staging lives in the
+    # cache -- NOT the location -- so the location only ever holds data/.
+    geo_suffix = f"_{shelves}_{boxes}"
+    staged_name = source_name if source_name.endswith(geo_suffix) else source_name + geo_suffix
+    staged = cache_subdir("staging") / staged_name
     if staged.is_symlink() or staged.exists():
         staged.unlink()
     staged.symlink_to(images, target_is_directory=True)
@@ -269,86 +336,89 @@ def do_sort(a, wsl, interactive):
     # Defensive: clear transient ingest residue left by an interrupted prior run with this name
     # (the pipeline's copytree into unsorted_unlabeled/<name> errors if it already exists).
     for sub in ("unsorted_unlabeled", "sorted_unlabeled"):
-        leftover = sort_path / "data" / "master_data" / sub / staged_name
+        leftover = store / "data" / "master_data" / sub / staged_name
         if leftover.exists():
             shutil.rmtree(leftover, ignore_errors=True)
 
     if a.archive:
-        # Archiving moves the raw run out of the source folder into the project's
+        # Archiving moves the raw run out of the source folder into the location's
         # data/unsorted_unlabeled_processed/ AFTER images are copied in for sorting. The
-        # source folder ends up empty -- safe (the images live in the project now), but the
+        # source folder ends up empty -- safe (the images live in the location now), but the
         # original location is consumed. Confirm interactively since it's not reversible there.
         src_disp = win_display(images) or images
         print(f"NOTE: --archive will MOVE (empty) the source folder after sorting:\n  {src_disp}")
         if interactive and not ask_yes("Proceed and archive (empty) the source folder?", default=True):
             sys.exit("Cancelled.")
 
-    before = stabilized_videos(sort_path)
-    cmd = nf_base(sort_path, work_dir, a.revision, archive=a.archive) + [
+    before = stabilized_videos(store)
+    cmd = nf_base(store, work_dir, a.revision, archive=a.archive) + [
         "--images_path", str(staged),
         "--boxes_per_shelf", str(boxes),
         "--stabilize", "true" if stabilize else "false",
     ]
-    print(f"\n-> Sorting {source_name} into project '{run_dir.name}'  "
+    print(f"\n-> Sorting {source_name} into {win_display(store) or store}  "
           f"({boxes} boxes x {shelves} shelves"
           f"{'; archiving source after' if a.archive else ''})...")
-    run_step(cmd, run_dir)
+    run_step(cmd, cache_subdir("run"))
 
     dest = resolve_dest(a, wsl, interactive)
-    finish_report(sort_path, before, dest, wsl)
+    finish_report(store, before, dest, wsl)
 
 
 def do_finish(a, wsl, interactive, mode):
-    project = a.project or ask("Project name")
-    run_dir, sort_path = project_paths(project)
-    work_dir = run_dir / "work"
-    if not sort_path.is_dir():
-        sys.exit(f"Project '{project}' not found at {run_dir}. Sort a run into it first.")
+    store = resolve_store(a, interactive)
+    work_dir = work_dir_for(store)
+    if not (store / "data" / "master_data").is_dir():
+        sys.exit(f"No store found at {win_display(store) or store}. Sort a run into it first.")
 
-    meta = load_meta(run_dir)
+    meta = load_meta(store)
     boxes = a.boxes_per_shelf or meta.get("boxes_per_shelf") or 1  # placeholder; not used to sort
     stabilize = a.stabilize if a.stabilize is not None else meta.get("stabilize", True)
 
     # The finish branch ignores images, but the pipeline still stages an images path -> give it
-    # a harmless empty placeholder.
-    placeholder = run_dir / "_finish_placeholder"
-    placeholder.mkdir(parents=True, exist_ok=True)
+    # a harmless empty placeholder (in the cache, not the location).
+    placeholder = cache_subdir("staging", "_finish_placeholder")
 
-    cmd = nf_base(sort_path, work_dir, a.revision) + [
+    cmd = nf_base(store, work_dir, a.revision) + [
         "--images_path", str(placeholder),
         "--boxes_per_shelf", str(boxes),
         "--stabilize", "true" if stabilize else "false",
     ]
 
+    where = win_display(store) or store
     if mode == "finish":
         raw = a.exp or ask("Experiment number(s) to finish (comma-separated)")
         exps = ",".join(e.strip() for e in raw.split(",") if e.strip())
         if not exps:
             sys.exit("No experiment numbers given.")
         cmd += ["--finish_experiments", exps]
-        print(f"\n-> Finishing experiment(s) {exps} in project '{run_dir.name}'...")
+        print(f"\n-> Finishing experiment(s) {exps} in {where}...")
     else:  # finish-all
         if interactive and not ask_yes(
-                f"Finish ALL experiments in '{run_dir.name}' and turn it over?", default=False):
+                f"Finish ALL experiments in {where} and turn it over?", default=False):
             sys.exit("Cancelled.")
         cmd += ["--finish_only", "true"]
-        print(f"\n-> Finishing ALL experiments in project '{run_dir.name}' (turning it over)...")
+        print(f"\n-> Finishing ALL experiments in {where} (turning it over)...")
 
-    before = stabilized_videos(sort_path)
-    run_step(cmd, run_dir)
+    before = stabilized_videos(store)
+    run_step(cmd, cache_subdir("run"))
     dest = resolve_dest(a, wsl, interactive)
-    finish_report(sort_path, before, dest, wsl)
+    finish_report(store, before, dest, wsl)
 
 
 def main():
     ap = argparse.ArgumentParser(description="Sort robot images and build root-growth videos.")
     ap.add_argument("--mode", choices=["sort", "finish", "finish-all"],
                     help="What to do (default: inferred -- sort if --images, finish if --exp).")
-    ap.add_argument("--project", help="Project name (folder under ~/image-sort-runs).")
+    ap.add_argument("--out", help="Persistent output location holding data/master_data + "
+                                  "data/videos. Pass the SAME path every time so runs accumulate.")
     ap.add_argument("--images", help="[sort] Images folder for this run (Windows or WSL path).")
     ap.add_argument("--exp", help="[finish] Experiment number(s) to finalize, comma-separated.")
-    ap.add_argument("--boxes-per-shelf", type=int, help="[sort] Boxes per shelf (remembered per project).")
-    ap.add_argument("--shelves", type=int, help="[sort] Override shelf count (normally read from the folder name).")
+    ap.add_argument("--boxes-per-shelf", type=int,
+                    help="[sort] Override boxes per shelf (normally read from the folder name; "
+                         "remembered per location as a fallback).")
+    ap.add_argument("--shelves", type=int,
+                    help="[sort] Override shelf count (normally read from the folder name).")
     ap.add_argument("--dest", help="Copy newly-finished videos here (Windows or Linux path). Optional.")
     ap.add_argument("--stabilize", dest="stabilize", action="store_true", default=None,
                     help="Stabilize videos (default).")
@@ -356,9 +426,9 @@ def main():
                     help="Skip stabilization.")
     ap.add_argument("--archive", action="store_true",
                     help="[sort] After sorting, MOVE the raw run out of the source folder into "
-                         "the project's data/unsorted_unlabeled_processed/ (empties the source).")
+                         "the location's data/unsorted_unlabeled_processed/ (empties the source).")
     ap.add_argument("--overwrite", action="store_true",
-                    help="[sort] Delete and recreate the project before sorting.")
+                    help="[sort] Delete and recreate the ENTIRE output location before sorting.")
     ap.add_argument("--revision", default=REVISION, help="Pipeline git revision to run (advanced).")
     a = ap.parse_args()
 
@@ -374,9 +444,9 @@ def main():
             mode = "sort"
         elif interactive:
             print("What would you like to do?")
-            print("  1) Sort a new run into a project")
+            print("  1) Sort a new run into your output location")
             print("  2) Finish specific experiments (make videos)")
-            print("  3) Finish all experiments (turn over the project)")
+            print("  3) Finish all experiments (turn over the location)")
             mode = {"1": "sort", "2": "finish", "3": "finish-all"}[
                 ask("Choose", default="1", ok=lambda v: v in ("1", "2", "3"))]
         else:

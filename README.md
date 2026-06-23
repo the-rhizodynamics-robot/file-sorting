@@ -41,36 +41,39 @@ current shell, so `image-sort` works immediately — no need to reopen Ubuntu.
 image-sort
 ```
 
-With no arguments `image-sort` shows a short menu — **1) Sort a run into a project ·
+With no arguments `image-sort` shows a short menu — **1) Sort a run into your output location ·
 2) Finish specific experiments · 3) Finish all (turn over)** — then asks only what that action
-needs. A **project** is a named workspace you feed runs into over time. For a *sort* it asks for
-the images folder (paste the Windows `C:\…` path — it converts it for you), the project to add
-the run to, boxes-per-shelf (remembered after the first run), and — optionally — a `C:\…` folder
-to copy finished videos to. The **number of shelves is read automatically from the run-folder
-name** (the robot names runs ending in the shelf count, e.g. `20260613_120000_3`).
+needs. Everything accumulates in **one persistent output location** you point at every run
+(`--out`); that location holds just two trees — `data/master_data` (experiments) and `data/videos`
+(finished videos). For a *sort* it asks for the images folder (paste the Windows `C:\…` path — it
+converts it for you), the output location to add the run to, and — optionally — a `C:\…` folder to
+copy finished videos to. The **imaging geometry (shelves and boxes-per-shelf) is read automatically
+from the run-folder name** (the robot names runs `<timestamp>_<shelves>_<boxes>`, e.g.
+`20260613120000_3_8`).
 
-Runs accumulate in the project's `current_exp/`; each experiment's **stabilized video is rendered
-automatically once a later run adds nothing to it** (the experiment is done), or immediately via
-the Finish actions. Processing happens on fast Linux storage under `~/image-sort-runs/<project>/`;
-it prints the `\\wsl.localhost\…` path and copies any newly-finished videos to your `--dest`.
-Before starting it checks Nextflow, Java, and a running Docker engine, and tells you what's missing.
+Runs accumulate in the location's `current_exp/`; each experiment's **stabilized video is rendered
+automatically once a later run adds nothing to it** (the experiment is done), or immediately via the
+Finish actions. Transient Nextflow files (the work dir, run staging) live under `~/.cache/image-sort`,
+never in your output location; it prints the `\\wsl.localhost\…` path and copies any newly-finished
+videos to your `--dest`. Before starting it checks Nextflow, Java, and a running Docker engine, and
+tells you what's missing.
 
 Prefer flags (scriptable)?
 
 ```bash
-# sort a run into a project (shelves read from the folder name)
-image-sort --mode sort --project barley_2026 \
-  --images 'C:\Users\you\Desktop\20260613_120000_3' \
-  --boxes-per-shelf 2 --dest 'C:\Users\you\Desktop\barley_videos'
+# sort a run into your output location (geometry read from the folder name);
+# pass the SAME --out every time so runs accumulate. It can be a WSL path (faster) or a C:\ path.
+image-sort --mode sort --out ~/root_data/barley_2026 \
+  --images 'C:\Users\you\Desktop\20260613120000_3_8' \
+  --dest 'C:\Users\you\Desktop\barley_videos'
 
-# add --archive to MOVE the raw run into the project after sorting (empties the source folder)
-image-sort --mode sort --project barley_2026 \
-  --images 'C:\Users\you\Desktop\20260613_120000_3' \
-  --boxes-per-shelf 2 --archive
+# add --archive to MOVE the raw run into the location after sorting (empties the source folder)
+image-sort --mode sort --out ~/root_data/barley_2026 \
+  --images 'C:\Users\you\Desktop\20260613120000_3_8' --archive
 
-# later: finish specific experiments, or turn the whole project over
-image-sort --mode finish     --project barley_2026 --exp 100001,100002 --dest 'C:\Users\you\Desktop\barley_videos'
-image-sort --mode finish-all --project barley_2026                     --dest 'C:\Users\you\Desktop\barley_videos'
+# later: finish specific experiments, or turn the whole location over
+image-sort --mode finish     --out ~/root_data/barley_2026 --exp 100001,100002 --dest 'C:\Users\you\Desktop\barley_videos'
+image-sort --mode finish-all --out ~/root_data/barley_2026                     --dest 'C:\Users\you\Desktop\barley_videos'
 ```
 
 > **First time on this machine?** Do the one-time
@@ -103,7 +106,7 @@ Given a folder (or zip) of raw images from one robot run, the pipeline:
    re-merges reviewed items on the next run.
 5. **Builds time-lapse videos** for each finished experiment and, by default,
    **stabilizes** them (`--stabilize`) so the root — not camera jitter — is what moves.
-6. **Archives** the consumed raw run into the project's processed area (`--archive`).
+6. **Archives** the consumed raw run into the location's processed area (`--archive`).
 
 Outputs land under your `--sort_path` in a fixed directory layout (see
 [Output layout](#output-layout)).
@@ -311,9 +314,8 @@ plain user shell.
 
 ```bash
 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
-  --images_path /mnt/c/Users/you/Desktop/run_7_7 \
+  --images_path /mnt/c/Users/you/Desktop/20260613120000_3_8 \
   --sort_path   /home/you/sorting_project \
-  --boxes_per_shelf 3 \
   --unzip false \
   --archive false
 ```
@@ -365,7 +367,7 @@ To finalize on demand there are two modes (the `image-sort` launcher exposes the
 **Finish specific** and **Finish all** menu items):
 
 ```bash
-# Finish ALL experiments currently in current_exp/ (turn the project over)
+# Finish ALL experiments currently in current_exp/ (turn the location over)
 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
   --images_path /home/you/sorting_project --sort_path /home/you/sorting_project \
   --boxes_per_shelf 2 --finish_only true --unzip false --archive false
@@ -386,20 +388,22 @@ requires a path — point it at any existing directory.
 |---|---|---|
 | `--images_path` | *(required)* | The run to process — a directory of images **or** a zip. |
 | `--sort_path` | *(required)* | Project base directory; all outputs are written here. |
-| `--boxes_per_shelf` | `3` | Containers per shelf, used to sort frames into experiments. |
+| `--boxes_per_shelf` | `3` | Containers per shelf, used to sort frames into experiments. Overridden by the `…_<shelves>_<boxes>` suffix of the folder name when present. |
 | `--unzip` | `true` | Treat `images_path` as a zip and unzip it first. Set `false` for a plain folder. |
 | `--stabilize` | `true` | Stabilize the generated time-lapse videos. |
 | `--finish_only` | `false` | Skip ingest/sort; finalize **all** experiments in `current_exp/` and (re)build videos. |
 | `--finish_experiments` | `""` | Skip ingest/sort; finalize only the comma-separated experiment numbers (e.g. `100001,100002`). |
 | `--archive` | `true` | On success, move the consumed raw run into `data/unsorted_unlabeled_processed/`. |
 
-> ⚠️ **Number of shelves is encoded in the input folder name.** There is no
-> `--num_shelves` parameter (yet). The sorter reads the **number after the final
-> underscore** of the `images_path` name as the shelf count, e.g.
-> `…/20260613_120000_3` → **3 shelves** (the robot names runs `<timestamp>_<shelves>`).
-> So the folder name **must end in `_<shelves>`**; a name whose final `_`-segment isn't
-> a number is rejected (use `--shelves N` via the `image-sort` launcher to override).
-> Multi-digit counts work. See [Roadmap](#roadmap) for the longer-term manifest plan.
+> ⚠️ **Imaging geometry is encoded in the input folder name.** There are no dedicated
+> shelf/box parameters (yet). The sorter reads the **last two underscore-separated
+> segments** of the `images_path` name as `…_<shelves>_<boxes>`, e.g.
+> `…/20260613120000_3_8` → **3 shelves, 8 boxes per shelf** (the robot names runs
+> `<timestamp>_<shelves>_<boxes>`; the timestamp itself has no underscores). Geometry from
+> the name **overrides `--boxes_per_shelf`**. Older `<timestamp>_<shelves>` folders still
+> work (shelves from the final segment, boxes from `--boxes_per_shelf`). Multi-digit counts
+> work. The `image-sort` launcher's `--shelves` / `--boxes-per-shelf` override for ad-hoc
+> folders. See [Roadmap](#roadmap) for the longer-term manifest plan.
 
 ---
 
@@ -453,10 +457,11 @@ builds and pushes a new `:latest` (and a SHA-tagged) image to GHCR.
 
 **Motivation.** The number of shelves is a *per-experiment* choice — an operator with
 only a few samples may image a single shelf and skip the empty ones — so it can't be
-inferred from the rig or reconstructed from memory weeks later. Today it survives only as
-the number after the final underscore of the input folder name (`<timestamp>_<shelves>`),
-which works (including multi-digit counts) but is still implicit — not validated or
-self-describing, and dependent on the capture side naming runs correctly.
+inferred from the rig or reconstructed from memory weeks later. Today the geometry survives
+only as the trailing `<timestamp>_<shelves>_<boxes>` segments of the input folder name
+(written by the capture side), which works (including multi-digit counts) but is still
+implicit — not validated or self-describing, and dependent on the capture side naming runs
+correctly.
 
 **Plan.** Persist the run configuration *at capture time* and have this pipeline read it:
 
@@ -556,7 +561,7 @@ This pipeline is part of the Rhizodynamics Robot. If you use it, please cite:
 **Validated end-to-end on Windows 10 (WSL2 + Docker CE).** On a Lenovo ThinkCentre test
 machine the full path is confirmed working: `wsl --install -d Ubuntu`, Docker CE under
 systemd, and complete `image-sort` runs that pulled the `file-sorting-env` container, sorted
-and labeled a real image set across multiple runs into one project, and produced stabilized
+and labeled a real image set across multiple runs into one output location, and produced stabilized
 `.mp4` videos via natural finishing, the **Finish specific** mode, and the **Finish all** mode.
 Runs are launched **from GitHub** (LF line endings, as documented above). `main.nf` uses the
 strict "Nextflow language" syntax and parses on current Nextflow (25.x / 26.x) with no version pin.
