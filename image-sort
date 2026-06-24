@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """image-sort -- friendly launcher for the file-sorting Nextflow pipeline.
 
-One persistent location: point every run at the same output location (--out) and the
-pipeline accumulates everything there. That location holds just two trees --
-data/master_data (experiments) and data/videos (finished stabilized videos). Experiments
-finish (move to finished_exp + stabilized video) automatically when a later run adds no
-new images to them; you can also finish specific experiments, or finish everything, on
-demand.
+Two things to think about: your images on C: (in) and a --dest folder on C: for the
+finished videos (out). Everything else is a persistent working store that lives on the
+fast local (WSL) disk and is auto-managed -- it accumulates every run's experiments
+(data/master_data) and videos (data/videos), and defaults to ~/image-sort-data so you
+never set it (override with --out if you must). Experiments finish (move to finished_exp +
+stabilized video) automatically when a later run adds no new images to them; you can also
+finish specific experiments, or finish everything, on demand.
 
 Modes:
-  sort        Sort a run's images into the location (default). Videos appear on their own
+  sort        Sort a run's images into the store (default). Videos appear on their own
               as experiments go static across runs.
   finish      Finalize specific experiment number(s) now (move to finished + video).
-  finish-all  Finalize everything currently in the location (turn it over).
+  finish-all  Finalize everything currently in the store (turn it over).
 
 Imaging geometry comes from the run folder's name: the robot names runs
 <timestamp>_<shelves>_<boxes> (e.g. 20260613120000_3_8), so the shelf count and
@@ -189,16 +190,15 @@ def last_store():
     return _read_all_meta().get("last")
 
 
+DEFAULT_STORE = Path.home() / "image-sort-data"
+
+
 def resolve_store(a, interactive):
-    """The persistent output location (== --sort_path). Same path every time -> accumulates."""
-    raw = a.out
-    if not raw:
-        if not interactive:
-            sys.exit("No output location given. Pass --out <path> -- the persistent location "
-                     "that holds data/master_data + data/videos.")
-        prompt = "Output location (holds data/master_data + data/videos)"
-        default = last_store()
-        raw = ask(prompt, default=default) if default else ask(prompt)
+    """The persistent working store (== --sort_path). It lives on the fast local (WSL) disk
+    and is auto-managed -- you normally never touch it; finished videos come out on C: via
+    --dest. Resolution order: explicit --out  >  last-used (remembered)  >  ~/image-sort-data.
+    """
+    raw = a.out or last_store() or str(DEFAULT_STORE)
     store = to_path(raw, "Output location").resolve()
     data = _read_all_meta()
     data["last"] = str(store)
@@ -233,14 +233,27 @@ def nf_base(sort_path, work_dir, revision, archive=False):
 
 
 def resolve_dest(a, wsl, interactive):
+    """Where finished videos are placed for the user -- the one path they care about. The
+    store keeps its own copy regardless; this is the convenient (e.g. C:\\) drop-off."""
     if a.dest is not None:
         raw = a.dest
     elif interactive:
-        hint = "Windows path, or " if wsl else ""
-        raw = input(f"Copy new videos to ({hint}Enter to keep in WSL only): ").strip()
+        q = "Folder on C: for the finished videos" if wsl else "Folder for the finished videos"
+        raw = input(f"{q} (Enter to skip): ").strip()
     else:
         raw = ""
     return to_path(raw, "Destination").resolve() if raw else None
+
+
+def junk_review_items(sort_path):
+    """Experiment folders parked in junk_review/ awaiting a human (excludes the re_merge
+    subfolder and hidden files). Non-empty => the sorter couldn't read a QR for them, so the
+    pipeline skipped finalizing them and printed a notice into its (captured) container log."""
+    d = sort_path / "data" / "master_data" / "junk_review"
+    if not d.is_dir():
+        return []
+    return sorted(p.name for p in d.iterdir()
+                  if p.name != "re_merge" and not p.name.startswith("."))
 
 
 def finish_report(sort_path, before, dest, wsl):
@@ -257,16 +270,28 @@ def finish_report(sort_path, before, dest, wsl):
             print(f"  WARNING: could not copy videos to {dest}: {e}")
 
     print("\nDone.")
-    print(f"  Location: {win_display(sort_path) or sort_path}")
+    print(f"  Store (all experiments + videos): {win_display(sort_path) or sort_path}")
+    print(f"  Intermediate work files (safe to delete): {work_dir_for(sort_path)}")
     if new:
         print(f"  Finished this run: {', '.join(v[:-4] for v in new)}")
         print(f"  Videos:  {stab}")
     else:
         print("  No experiments finished this run.")
     if wsl:
-        print(f"  Open in Explorer: {wsl_unc(sort_path)}")
+        print(f"  Open store in Explorer: {wsl_unc(sort_path)}")
     if dest:
         print(f"  Copied new videos to: {win_display(dest) or dest}")
+
+    pending = junk_review_items(sort_path)
+    if pending:
+        jr = sort_path / "data" / "master_data" / "junk_review"
+        print(f"\n  WARNING -- junk review: {len(pending)} experiment folder(s) need attention.")
+        print("     The sorter couldn't read a QR for these, so they were NOT finalized.")
+        print("     Open the folder below, move any you want to keep into its 're_merge'")
+        print("     subfolder (renamed with the correct experiment number), then re-run:")
+        print(f"       {win_display(jr) or jr}")
+        if wsl:
+            print(f"       Explorer: {wsl_unc(jr)}")
 
 
 # ---------- modes ----------
@@ -410,8 +435,9 @@ def main():
     ap = argparse.ArgumentParser(description="Sort robot images and build root-growth videos.")
     ap.add_argument("--mode", choices=["sort", "finish", "finish-all"],
                     help="What to do (default: inferred -- sort if --images, finish if --exp).")
-    ap.add_argument("--out", help="Persistent output location holding data/master_data + "
-                                  "data/videos. Pass the SAME path every time so runs accumulate.")
+    ap.add_argument("--out", help="(advanced) Working store dir on the fast local disk, "
+                                  "auto-managed; defaults to ~/image-sort-data. You normally "
+                                  "don't set this -- finished videos come out via --dest.")
     ap.add_argument("--images", help="[sort] Images folder for this run (Windows or WSL path).")
     ap.add_argument("--exp", help="[finish] Experiment number(s) to finalize, comma-separated.")
     ap.add_argument("--boxes-per-shelf", type=int,
@@ -419,7 +445,8 @@ def main():
                          "remembered per location as a fallback).")
     ap.add_argument("--shelves", type=int,
                     help="[sort] Override shelf count (normally read from the folder name).")
-    ap.add_argument("--dest", help="Copy newly-finished videos here (Windows or Linux path). Optional.")
+    ap.add_argument("--dest", help="Folder on C: where finished videos are placed (what you "
+                                   "open). Optional; if omitted they stay in the store.")
     ap.add_argument("--stabilize", dest="stabilize", action="store_true", default=None,
                     help="Stabilize videos (default).")
     ap.add_argument("--no-stabilize", dest="stabilize", action="store_false",

@@ -41,39 +41,41 @@ current shell, so `image-sort` works immediately — no need to reopen Ubuntu.
 image-sort
 ```
 
-With no arguments `image-sort` shows a short menu — **1) Sort a run into your output location ·
-2) Finish specific experiments · 3) Finish all (turn over)** — then asks only what that action
-needs. Everything accumulates in **one persistent output location** you point at every run
-(`--out`); that location holds just two trees — `data/master_data` (experiments) and `data/videos`
-(finished videos). For a *sort* it asks for the images folder (paste the Windows `C:\…` path — it
-converts it for you), the output location to add the run to, and — optionally — a `C:\…` folder to
-copy finished videos to. The **imaging geometry (shelves and boxes-per-shelf) is read automatically
-from the run-folder name** (the robot names runs `<timestamp>_<shelves>_<boxes>`, e.g.
+**There are only two things to think about: your images on `C:` (in) and a `--dest` folder on
+`C:` for the finished videos (out).** Everything in between is a persistent working **store** that
+lives on the fast local (WSL) disk and is **auto-managed** — it accumulates every run's experiments
+(`data/master_data`) and videos (`data/videos`), defaults to `~/image-sort-data`, and you never set
+it (override with `--out` only if you must).
+
+With no arguments `image-sort` shows a short menu — **1) Sort a run · 2) Finish specific experiments ·
+3) Finish all (turn over)** — then asks only what that action needs. For a *sort* it asks for the
+images folder (paste the Windows `C:\…` path — it converts it for you) and, optionally, the `C:\…`
+folder to drop finished videos in. The **imaging geometry (shelves and boxes-per-shelf) is read
+automatically from the run-folder name** (the robot names runs `<timestamp>_<shelves>_<boxes>`, e.g.
 `20260613120000_3_8`).
 
-Runs accumulate in the location's `current_exp/`; each experiment's **stabilized video is rendered
+Runs accumulate in the store's `current_exp/`; each experiment's **stabilized video is rendered
 automatically once a later run adds nothing to it** (the experiment is done), or immediately via the
-Finish actions. Transient Nextflow files (the work dir, run staging) live under `~/.cache/image-sort`,
-never in your output location; it prints the `\\wsl.localhost\…` path and copies any newly-finished
-videos to your `--dest`. Before starting it checks Nextflow, Java, and a running Docker engine, and
-tells you what's missing.
+Finish actions. Newly-finished videos are copied to your `--dest` on `C:`; the store keeps its own
+copy too (it prints the `\\wsl.localhost\…` path if you want it). Before starting it checks Nextflow,
+Java, and a running Docker engine, and tells you what's missing.
 
 Prefer flags (scriptable)?
 
 ```bash
-# sort a run into your output location (geometry read from the folder name);
-# pass the SAME --out every time so runs accumulate. It can be a WSL path (faster) or a C:\ path.
-image-sort --mode sort --out ~/root_data/barley_2026 \
+# sort a run (geometry read from the folder name); just point at the images and a C:\ dest.
+# The store is auto-managed in WSL, so runs accumulate with no --out to track.
+image-sort --mode sort \
   --images 'C:\Users\you\Desktop\20260613120000_3_8' \
   --dest 'C:\Users\you\Desktop\barley_videos'
 
-# add --archive to MOVE the raw run into the location after sorting (empties the source folder)
-image-sort --mode sort --out ~/root_data/barley_2026 \
+# add --archive to MOVE the raw run into the store after sorting (empties the source folder)
+image-sort --mode sort \
   --images 'C:\Users\you\Desktop\20260613120000_3_8' --archive
 
-# later: finish specific experiments, or turn the whole location over
-image-sort --mode finish     --out ~/root_data/barley_2026 --exp 100001,100002 --dest 'C:\Users\you\Desktop\barley_videos'
-image-sort --mode finish-all --out ~/root_data/barley_2026                     --dest 'C:\Users\you\Desktop\barley_videos'
+# later: finish specific experiments, or turn the whole store over
+image-sort --mode finish     --exp 100001,100002 --dest 'C:\Users\you\Desktop\barley_videos'
+image-sort --mode finish-all                     --dest 'C:\Users\you\Desktop\barley_videos'
 ```
 
 > **First time on this machine?** Do the one-time
@@ -106,7 +108,7 @@ Given a folder (or zip) of raw images from one robot run, the pipeline:
    re-merges reviewed items on the next run.
 5. **Builds time-lapse videos** for each finished experiment and, by default,
    **stabilizes** them (`--stabilize`) so the root — not camera jitter — is what moves.
-6. **Archives** the consumed raw run into the location's processed area (`--archive`).
+6. **Archives** the consumed raw run into the store's processed area (`--archive`).
 
 Outputs land under your `--sort_path` in a fixed directory layout (see
 [Output layout](#output-layout)).
@@ -367,7 +369,7 @@ To finalize on demand there are two modes (the `image-sort` launcher exposes the
 **Finish specific** and **Finish all** menu items):
 
 ```bash
-# Finish ALL experiments currently in current_exp/ (turn the location over)
+# Finish ALL experiments currently in current_exp/ (turn the store over)
 nextflow run the-rhizodynamics-robot/file-sorting -r main -profile local \
   --images_path /home/you/sorting_project --sort_path /home/you/sorting_project \
   --boxes_per_shelf 2 --finish_only true --unzip false --archive false
@@ -561,7 +563,7 @@ This pipeline is part of the Rhizodynamics Robot. If you use it, please cite:
 **Validated end-to-end on Windows 10 (WSL2 + Docker CE).** On a Lenovo ThinkCentre test
 machine the full path is confirmed working: `wsl --install -d Ubuntu`, Docker CE under
 systemd, and complete `image-sort` runs that pulled the `file-sorting-env` container, sorted
-and labeled a real image set across multiple runs into one output location, and produced stabilized
+and labeled a real image set across multiple runs into one auto-managed store, and produced stabilized
 `.mp4` videos via natural finishing, the **Finish specific** mode, and the **Finish all** mode.
 Runs are launched **from GitHub** (LF line endings, as documented above). `main.nf` uses the
 strict "Nextflow language" syntax and parses on current Nextflow (25.x / 26.x) with no version pin.
