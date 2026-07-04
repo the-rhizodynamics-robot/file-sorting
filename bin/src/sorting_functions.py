@@ -23,6 +23,37 @@ import time
 from PIL import Image
 
 
+# Image file extensions the pipeline ingests. Used to (a) discover images
+# regardless of capture software and (b) skip non-image files (manifests,
+# .DS_Store, thumbnails) that would otherwise crash the frame-index parser.
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+
+
+def _image_files(path):
+    """List image files in `path` (by extension), non-hidden, sorted."""
+    return [f for f in sorted(os.listdir(path))
+            if not f.startswith(".")
+            and isfile(join(path, f))
+            and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS]
+
+
+def _dominant_ext(folder):
+    """The most common image extension in `folder` (defaults to .png).
+
+    Used to pick the ffmpeg glob so a folder of .jpg frames builds a video
+    the same way a legacy folder of .png frames does. A single experiment is
+    one continuous imaging campaign with one camera, so it is normally uniform.
+    """
+    counts = {}
+    for f in listdir_nohidden(folder):
+        e = os.path.splitext(f)[1].lower()
+        if e in IMAGE_EXTENSIONS:
+            counts[e] = counts.get(e, 0) + 1
+    if not counts:
+        return ".png"
+    return max(counts, key=counts.get)
+
+
 def init(boxes_per_shelf, sort_path, staging_path, model_path):
     """ Declare constants for save paths"""
 
@@ -73,10 +104,13 @@ def sort(base_path, shelves):
     mypathout = SORTED_UNLABELED_PATH + base_path
 
     # create onlyfiles w column list with file name in first column and parsed image # as second column
-    # create a list of all the files in the image directory
-    onlyfiles = [f for f in listdir(mypathin) if isfile(join(mypathin, f))]
+    # list the image files only (skip manifests/hidden/non-image files)
+    onlyfiles = _image_files(mypathin)
 
-    # flycap names images with a _####, from 0000 to 9999, then goes to 10000,
+    # Both capture tools put the frame index as the LAST '-'-separated segment
+    # before the extension, so one parse covers both:
+    #   FlyCap    fc2_save_<date>-<HHMMSS>-<frame####>.png  -> frame####
+    #   Spinnaker <name>-<timestamp>-<frame#>.jpg           -> frame#
     filenum = [int(c.rsplit('-',1)[1].rsplit('.',1)[0]) for c in onlyfiles]
 
     # final list
@@ -91,8 +125,8 @@ def sort(base_path, shelves):
     timestamps = []
     current_dir = Path(mypathin)
     for element in current_dir.iterdir():
-        info = element.stat()
-        timestamps.append(info.st_mtime)
+        if element.is_file() and element.suffix.lower() in IMAGE_EXTENSIONS:
+            timestamps.append(element.stat().st_mtime)
     timestamps.sort()
     # this will make a number of directories in the out directory equal to the number of boxes, names 1\, 2\, 3\, etc
     for x in range(num_boxes):
@@ -108,7 +142,9 @@ def sort(base_path, shelves):
     for z in range(1,int(len(files)/num_boxes)*num_boxes,num_boxes):
         count = count +1
         for y in range(num_boxes):
-            savefile=mypathout + "/" + str(y+1) + "/" + str(100000000 + count)[-8:] + "_" + str(timestamps[z+y-1]) + ".png"
+            # keep the source extension (.jpg stays .jpg, .png stays .png)
+            ext = os.path.splitext(files[z+y-1][0])[1].lower()
+            savefile=mypathout + "/" + str(y+1) + "/" + str(100000000 + count)[-8:] + "_" + str(timestamps[z+y-1]) + ext
             filename = mypathin + "/" + files[z+y-1][0]
             shutil.move(filename, savefile)
     os.chdir("/home")
@@ -175,7 +211,12 @@ def label(base_path):
                 
             crop_sum = crop_sum + np.sum(img[box[1]:box[3],box[0]:box[2]])
             if len(barcode)>0:
-                exp_name = (int((str(barcode[0][0]).split('\'')[1::2])[0])) 
+                # QR payload is the experiment/container label. Keep it as a
+                # string so both numeric (legacy, e.g. 100001) and alphanumeric
+                # (e.g. B4) codes work; sanitize path separators for a safe
+                # folder name. A numeric code yields the same folder it always did.
+                exp_name = barcode[0][0].decode('utf-8', 'ignore').strip()
+                exp_name = exp_name.replace('/', '_').replace('\\', '_')
                 print("Position number = " + str(os.path.basename(d)))
                 print("Box number = " + str(exp_name))
                 temp_path = current_exp_path + "/" + str(exp_name)
@@ -325,9 +366,10 @@ def final_transfer(current_exp_list, stabilize = True):
                 start = time.time()
 
                 src = FINISHED_EXP_PATH + current_exp_name + "/"
+                glob_pat = "*" + _dominant_ext(src)
                 os.chdir(src)
-                command = 'ffmpeg -framerate 15 -pattern_type glob -i \"*.png\" -c:v libx264 -crf 24 -pix_fmt yuv420p outfile.mp4'
-                subprocess.call(command,shell=True)     
+                command = 'ffmpeg -framerate 15 -pattern_type glob -i \"' + glob_pat + '\" -c:v libx264 -crf 24 -pix_fmt yuv420p outfile.mp4'
+                subprocess.call(command,shell=True)
                 
                 if stabilize:
                     command = 'ffmpeg -i outfile.mp4 -vf vidstabdetect=stepsize=32:shakiness=10:accuracy=10:result=transforms.trf -f null -'
@@ -370,8 +412,9 @@ def finish_experiments(exp_list, stabilize = True):
 
         start = time.time()
         src = FINISHED_EXP_PATH + exp_name + "/"
+        glob_pat = "*" + _dominant_ext(src)
         os.chdir(src)
-        command = 'ffmpeg -framerate 15 -pattern_type glob -i \"*.png\" -c:v libx264 -crf 24 -pix_fmt yuv420p outfile.mp4'
+        command = 'ffmpeg -framerate 15 -pattern_type glob -i \"' + glob_pat + '\" -c:v libx264 -crf 24 -pix_fmt yuv420p outfile.mp4'
         subprocess.call(command, shell=True)
 
         if stabilize:
