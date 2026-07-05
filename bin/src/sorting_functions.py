@@ -372,10 +372,10 @@ def final_transfer(current_exp_list, stabilize = True):
                 subprocess.call(command,shell=True)
                 
                 if stabilize:
-                    command = 'ffmpeg -i outfile.mp4 -vf vidstabdetect=stepsize=32:shakiness=10:accuracy=10:result=transforms.trf -f null -'
+                    command = 'ffmpeg -i outfile.mp4 -vf vidstabdetect=shakiness=5:accuracy=15:stepsize=6:mincontrast=0.1:result=transforms.trf -f null -'
                     subprocess.call(command,shell=True)
                     
-                    command = 'ffmpeg -i outfile.mp4 -vf vidstabtransform=smoothing:input=\"transforms.trf\" outfile_stabilized.mp4'
+                    command = 'ffmpeg -i outfile.mp4 -vf vidstabtransform=input=transforms.trf:smoothing=30:optzoom=1 outfile_stabilized.mp4'
                     subprocess.call(command,shell=True)
 
                     shutil.copy(FINISHED_EXP_PATH + current_exp_list[x][0] + "/outfile_stabilized.mp4", STABILIZED_VIDEO_PATH + current_exp_name + ".mp4")
@@ -418,9 +418,9 @@ def finish_experiments(exp_list, stabilize = True):
         subprocess.call(command, shell=True)
 
         if stabilize:
-            command = 'ffmpeg -i outfile.mp4 -vf vidstabdetect=stepsize=32:shakiness=10:accuracy=10:result=transforms.trf -f null -'
+            command = 'ffmpeg -i outfile.mp4 -vf vidstabdetect=shakiness=5:accuracy=15:stepsize=6:mincontrast=0.1:result=transforms.trf -f null -'
             subprocess.call(command, shell=True)
-            command = 'ffmpeg -i outfile.mp4 -vf vidstabtransform=smoothing:input=\"transforms.trf\" outfile_stabilized.mp4'
+            command = 'ffmpeg -i outfile.mp4 -vf vidstabtransform=input=transforms.trf:smoothing=30:optzoom=1 outfile_stabilized.mp4'
             subprocess.call(command, shell=True)
             shutil.copy(FINISHED_EXP_PATH + exp_name + "/outfile_stabilized.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
             os.remove(FINISHED_EXP_PATH + exp_name + "/outfile_stabilized.mp4")
