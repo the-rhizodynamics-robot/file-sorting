@@ -232,17 +232,44 @@ def nf_base(sort_path, work_dir, revision, archive=False):
             "--unzip", "false", "--archive", "true" if archive else "false"]
 
 
+def default_dest(wsl):
+    """Default drop-off for finished videos: <Desktop>/final_imaging_data.
+
+    On WSL that's the *Windows* user's Desktop (so videos land on C: and show up
+    in Explorer). The WSL username can differ from the Windows one, so we ask
+    Windows for %USERPROFILE% via cmd.exe rather than guessing from $HOME.
+    Running from /mnt/c keeps cmd.exe from printing its UNC-path warning.
+    On native Linux (or if that probe fails) fall back to ~/Desktop, else ~."""
+    if wsl:
+        try:
+            r = subprocess.run(["cmd.exe", "/c", "echo %USERPROFILE%"],
+                               capture_output=True, text=True, cwd="/mnt/c")
+            prof = r.stdout.strip()
+            if len(prof) >= 2 and prof[1] == ":" and prof[0].isalpha():
+                return Path(win_to_wsl(prof)) / "Desktop" / "final_imaging_data"
+        except Exception:
+            pass
+    home = Path.home()
+    base = home / "Desktop" if (home / "Desktop").is_dir() else home
+    return base / "final_imaging_data"
+
+
 def resolve_dest(a, wsl, interactive):
     """Where finished videos are placed for the user -- the one path they care about. The
-    store keeps its own copy regardless; this is the convenient (e.g. C:\\) drop-off."""
+    store keeps its own copy regardless; this is the convenient (e.g. C:\\) drop-off.
+    Defaults to <Desktop>/final_imaging_data when nothing is supplied."""
+    default = default_dest(wsl)
     if a.dest is not None:
         raw = a.dest
     elif interactive:
         q = "Folder on C: for the finished videos" if wsl else "Folder for the finished videos"
-        raw = input(f"{q} (Enter to skip): ").strip()
+        shown = win_display(default) or str(default)
+        raw = input(f"{q} [{shown}]: ").strip()
+        if not raw:
+            return default
     else:
-        raw = ""
-    return to_path(raw, "Destination").resolve() if raw else None
+        return default
+    return to_path(raw, "Destination").resolve() if raw else default
 
 
 def junk_review_items(sort_path):
