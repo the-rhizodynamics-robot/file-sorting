@@ -100,8 +100,12 @@ The GROOT system is three repositories:
 
 Given a folder (or zip) of raw images from one robot run, the pipeline:
 
-1. **Unzips / ingests** the run into a working area (`--unzip`).
+1. **Unzips / ingests** the run into a working area (`--unzip`). Images are discovered by
+   **extension** (`.png/.jpg/.jpeg/.bmp/.tif`), so both **FlyCap** (`fc2_save_…-0000.png`)
+   and **Spinnaker** (`<name>-<timestamp>-0.jpg`) captures work, and a stray file such as a
+   run manifest can sit alongside the images without breaking ingestion.
 2. **Sorts** images into per-container experiments, using the box position in each frame.
+   Output videos preserve the source frame format (PNG or JPG).
 3. **Labels** each container by reading its QR code and detecting seeds, via two
    bundled inference models (`qrInference.h5`, `SeedInference.h5`).
 4. **Routes** anything ambiguous to a `junk_review` area for a human to resolve, and
@@ -477,9 +481,10 @@ correctly.
 3. **Resolution + precedence**, resolved and logged once in `main.nf`:
    `explicit param  >  run_config manifest in the run dir  >  fail fast`
    (a clear error if neither is supplied — never a silent mis-sort).
-4. **Harden the sorter.** Make the image listing filter to known image extensions
-   (`.png/.jpg/…`) instead of "every file in the directory," so the manifest (and any
-   stray file) can sit alongside the images without breaking the FlyCap filename parser.
+4. ~~**Harden the sorter.** Make the image listing filter to known image extensions
+   (`.png/.jpg/…`) instead of "every file in the directory."~~ **Done** — `sort()` now
+   discovers images via `IMAGE_EXTENSIONS`, so a manifest (or any stray file) can sit
+   alongside the images without breaking the parser.
 
 **Result.** Each run becomes self-describing and reproducible; shelf count is carried by
 the data (validated, not inferred from a folder name), and the per-experiment variable-shelf
@@ -488,20 +493,18 @@ processing consumes it (file-sorting).
 
 ### Generalize image ingestion (don't assume FlyCap filenames)
 
-The sorter currently hard-codes the legacy **FlyCap** naming scheme — it expects files
-like `fc2_save_…-0000.png` and parses the frame index from the `-####` suffix
-(`sorting_functions.py`). FlyCap is old software; newer capture tools (e.g. FLIR
-Spinnaker / SpinView, or any replacement camera software) almost certainly use a
-different prefix and numbering format, which would break ingestion.
+**Partly done.** The sorter no longer hard-codes a filename *prefix*: `sort()` discovers
+images by **extension** (`IMAGE_EXTENSIONS`) and parses the frame index from the last
+`-`-separated segment before the extension, which covers **both** FlyCap
+(`fc2_save_…-0000.png`) and Spinnaker (`<name>-<timestamp>-0.jpg`), including JPG output
+(`sorting_functions.py`).
 
-Make image ingestion **capture-software-agnostic**:
-- Don't filter or order by a hard-coded prefix. Discover images by **extension**
-  (`.png/.jpg/…`) and derive ordering from a robust source — a configurable filename
-  pattern, EXIF/file mtime, or an explicit index — rather than assuming `-####`.
-- Allow the expected filename pattern to be supplied (param or the run-config manifest
-  above), defaulting to the FlyCap pattern for backward compatibility.
-- This pairs naturally with the manifest work: the capture software and its filename
-  convention can be recorded at capture time and honored at processing time.
+**Still open:** ordering still relies on that trailing counter alone, which is the root of
+the [round-robin desync bug](#fix-the-image-ordering--frame-numbering-bug-round-robin-desync)
+below. The remaining work is to derive frame ordering from a **robust source** — full
+capture identity (timestamp prefix *and* index), file mtime, or an explicit per-frame index —
+rather than the `-####` counter, ideally with the capture software and its filename convention
+recorded in the run-config manifest at capture time and honored here.
 
 ### Fix the image-ordering / frame-numbering bug (round-robin desync)
 
