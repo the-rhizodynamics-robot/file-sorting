@@ -207,8 +207,12 @@ def resolve_store(a, interactive):
 
 
 def stabilized_videos(sort_path):
+    """{(name, mtime)} for every finished video. Only ever used as a before/after set
+    difference. mtime is part of the key because experiment labels come from the QR codes
+    and can repeat (recycled labels while testing): on names alone, re-rendering an
+    existing number looks like nothing happened, so it is neither copied nor reported."""
     d = sort_path / "data" / "videos" / "stabilized"
-    return {p.name for p in d.glob("*.mp4")} if d.is_dir() else set()
+    return {(p.name, p.stat().st_mtime) for p in d.glob("*.mp4")} if d.is_dir() else set()
 
 
 def derive_geometry(folder_name):
@@ -285,14 +289,16 @@ def junk_review_items(sort_path):
 
 def finish_report(sort_path, before, dest, wsl):
     """Copy newly-rendered stabilized videos to dest (if any) and print where things landed."""
-    new = sorted(stabilized_videos(sort_path) - before)
+    new = sorted(name for name, _ in stabilized_videos(sort_path) - before)
     stab = sort_path / "data" / "videos" / "stabilized"
+    copied = []
     if dest and new:
         print(f"-> Copying {len(new)} new video(s) to {win_display(dest) or dest} ...")
         try:
             dest.mkdir(parents=True, exist_ok=True)
             for v in new:
                 shutil.copy2(stab / v, dest / v)
+                copied.append(v)
         except (PermissionError, OSError) as e:
             print(f"  WARNING: could not copy videos to {dest}: {e}")
 
@@ -306,8 +312,10 @@ def finish_report(sort_path, before, dest, wsl):
         print("  No experiments finished this run.")
     if wsl:
         print(f"  Open store in Explorer: {wsl_unc(sort_path)}")
-    if dest:
-        print(f"  Copied new videos to: {win_display(dest) or dest}")
+    if copied:  # only when files actually landed there -- this used to print on any --dest
+        print(f"  Copied {len(copied)} video(s) to: {win_display(dest) or dest}")
+    elif dest and new:
+        print(f"  NOT copied to {win_display(dest) or dest} -- see the warning above.")
 
     pending = junk_review_items(sort_path)
     if pending:
