@@ -28,6 +28,15 @@ from PIL import Image
 # .DS_Store, thumbnails) that would otherwise crash the frame-index parser.
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 
+# The capture manifest robot-control writes into every run folder: imaging geometry, cycle interval,
+# camera settings and (in time) the rig's px_per_mm. Downstream analysis needs those numbers, and
+# today an operator has to supply them by hand, so each finished experiment gets a copy.
+#
+# It is held in memory between capture and write rather than carried along the pipeline: label()
+# parses filenames as int(name[0:8]), so a manifest sitting in a box folder mid-run would crash it.
+RUN_CONFIG_NAME = "run_config.json"
+_RUN_MANIFEST = None   # the run's manifest as bytes, or None when the run has none
+
 
 def _image_files(path):
     """List image files in `path` (by extension), non-hidden, sorted."""
@@ -54,6 +63,37 @@ def _dominant_ext(folder):
     return max(counts, key=counts.get)
 
 
+def capture_run_manifest(run_dir):
+    """Remember this run's run_config.json, from the ingested copy or the staging folder.
+
+    Returns True when a manifest was found. A run without one is normal (captures before
+    2026-09-14 have none) and is not an error -- downstream is simply told nothing.
+    """
+    global _RUN_MANIFEST
+    candidates = [os.path.join(run_dir, RUN_CONFIG_NAME)]
+    staging = globals().get("STAGING_PATH")
+    if staging:
+        candidates.append(os.path.join(staging, RUN_CONFIG_NAME))
+    for candidate in candidates:
+        if isfile(candidate):
+            with open(candidate, "rb") as f:
+                _RUN_MANIFEST = f.read()
+            print("Captured " + RUN_CONFIG_NAME + " from " + candidate)
+            return True
+    _RUN_MANIFEST = None
+    print("No " + RUN_CONFIG_NAME + " in this run; downstream analysis will need the run's settings by hand")
+    return False
+
+
+def write_run_manifest(dest_dir):
+    """Write the captured manifest into a finished experiment, so the run's own settings travel with it."""
+    if not _RUN_MANIFEST:
+        return False
+    with open(os.path.join(dest_dir, RUN_CONFIG_NAME), "wb") as f:
+        f.write(_RUN_MANIFEST)
+    return True
+
+
 def init(boxes_per_shelf, sort_path, staging_path, model_path):
     """ Declare constants for save paths"""
 
@@ -70,6 +110,7 @@ def init(boxes_per_shelf, sort_path, staging_path, model_path):
     global QR_MODEL
     global BOXES_PER_SHELF
     global STABILIZED_VIDEO_PATH
+    global _RUN_MANIFEST
 
     SORT_PATH = os.path.abspath(sort_path)
     DATA_PATH = os.path.join(SORT_PATH, "data", "")
@@ -84,6 +125,7 @@ def init(boxes_per_shelf, sort_path, staging_path, model_path):
     FINAL_VIDEO_PATH = os.path.join(DATA_PATH, "videos", "unstabilized", "")
     STABILIZED_VIDEO_PATH = os.path.join(DATA_PATH, "videos", "stabilized", "")
     BOXES_PER_SHELF = int(boxes_per_shelf)
+    _RUN_MANIFEST = None # a fresh run: forget anything captured by an earlier call
     
 
     # load all retinanet models
@@ -359,6 +401,8 @@ def final_transfer(current_exp_list, stabilize = True):
                 except Exception as e:
                     print(e)
 
+                write_run_manifest(FINISHED_EXP_PATH + current_exp_list[x][0]) # run settings travel with the experiment
+
                 # make video and move it
                 src = FINISHED_EXP_PATH + current_exp_list[x][0] + "/"
                 os.chdir(src)
@@ -409,6 +453,8 @@ def finish_experiments(exp_list, stabilize = True):
             print(e)
         except Exception as e:
             print(e)
+
+        write_run_manifest(FINISHED_EXP_PATH + exp_name) # run settings travel with the experiment
 
         start = time.time()
         src = FINISHED_EXP_PATH + exp_name + "/"
@@ -481,9 +527,11 @@ def transfer_to_processing(images_path, unzip):
         with zipfile.ZipFile(images_path, "r") as zip_ref:
             zip_ref.extractall(UNSORTED_UNLABELED_PATH + run_name)
         os.chdir("/home")
+        capture_run_manifest(UNSORTED_UNLABELED_PATH + run_name)
     else:
         destination_path = os.path.join(UNSORTED_UNLABELED_PATH, os.path.basename(images_path))
         shutil.copytree(images_path, destination_path)
+        capture_run_manifest(destination_path)
 
 
 def listdir_nohidden(path):

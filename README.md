@@ -424,7 +424,7 @@ data/
     unsorted_unlabeled/
     sorted_unlabeled/
     current_exp/                  # experiments in progress
-    finished_exp/                 # completed experiments
+    finished_exp/                 # completed experiments (each carries the run's run_config.json)
     junk_exp/
     junk_review/                  # ambiguous items awaiting human review
   videos/
@@ -471,11 +471,18 @@ correctly.
 
 **Plan.** Persist the run configuration *at capture time* and have this pipeline read it:
 
-1. **Capture writes a manifest.** The robot-control host (`robot_host`) already prompts
-   for `num_shelves`, `boxes_per_shelf`, etc. at the handshake, so it knows them at run
-   start. It writes a **visible** `run_config.json` (or `.toml`, to match the host's
-   existing `config.toml`) into the image directory. Visible — not hidden — so it survives
-   the external zip → transfer → unzip step (many tools silently drop dotfiles).
+1. ~~**Capture writes a manifest.**~~ **Done (robot-control, 2026-09-14).** `robot_host` writes a
+   **visible** `run_config.json` into every run folder — imaging geometry, cycle interval, host
+   commit, and the camera settings in use. Visible, not hidden, so it survives the external
+   zip → transfer → unzip step (many tools silently drop dotfiles).
+   - ~~**Carried through to each experiment.**~~ **Done here:** `transfer_to_processing()` captures
+     the manifest when a run is ingested, and `final_transfer()` / `finish_experiments()` write a
+     copy into each `finished_exp/<box>/`. Downstream analysis (root-tracking's quantification) then
+     inherits the run's cycle interval — and its `px_per_mm` once capture records one — instead of
+     an operator typing them in. The manifest is held in memory in between rather than carried along
+     the pipeline: `label()` parses filenames as `int(name[0:8])`, so a manifest sitting inside a box
+     folder mid-run would crash it. **Not yet carried to `videos/stabilized/`**, so an experiment
+     reanalysed from its mp4 still needs those settings supplied by hand.
 2. **Pipeline gains optional params.** Add `--num_shelves` (and optionally
    `--photos_per_shelf`) to `main.nf`, defaulting to null.
 3. **Resolution + precedence**, resolved and logged once in `main.nf`:
