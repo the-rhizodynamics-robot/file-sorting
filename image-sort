@@ -10,8 +10,9 @@ stabilized video) automatically when a later run adds no new images to them; you
 finish specific experiments, or finish everything, on demand.
 
 Modes:
-  sort        Sort a run's images into the store (default). Videos appear on their own
-              as experiments go static across runs.
+  sort        Sort one run, or several (oldest first), into the store (default). Videos
+              appear on their own as experiments go static across runs; runs already
+              sorted into the store are skipped.
   finish      Finalize specific experiment number(s) now (move to finished + video).
   finish-all  Finalize everything currently in the store (turn it over).
 
@@ -27,9 +28,11 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 PIPELINE = "the-rhizodynamics-robot/file-sorting"
@@ -136,9 +139,13 @@ def preflight():
         )
 
 
-def run_step(cmd, cwd):
+def run_step(cmd, cwd, fatal=True):
+    """Run one pipeline step. Exits on failure, or returns False if fatal=False."""
     if subprocess.run(cmd, env=dict(os.environ), cwd=str(cwd)).returncode != 0:
-        sys.exit("\nA pipeline step failed -- see the Nextflow output above.")
+        if fatal:
+            sys.exit("\nA pipeline step failed -- see the Nextflow output above.")
+        return False
+    return True
 
 
 # ---------- cache / store helpers ----------
@@ -227,6 +234,114 @@ def derive_geometry(folder_name):
     if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
         return int(parts[1]), int(parts[2])
     return None, None
+
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}  # as the sorter ingests
+RUN_TIMESTAMP = re.compile(r"^(\d{14})_")   # robot run folders start <YYYYMMDDHHMMSS>_
+
+
+def has_images(folder):
+    try:
+        return any(p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+                   for p in folder.iterdir())
+    except OSError:
+        return False
+
+
+def collect_runs(raw_paths):
+    """Run folders to sort, oldest first, plus (name, why) for folders skipped as empty.
+
+    Each path is either a run folder (it holds images) or a parent of run folders. Several
+    runs are ordered by the timestamp the robot puts at the start of each folder name; the
+    sorter appends each run's frames to the experiment of the same QR label, so order is
+    the experiment's timeline and is never guessed.
+    """
+    runs, empty = [], []
+    for raw in raw_paths:
+        p = to_path(raw, "Images folder")
+        if not p.is_dir():
+            hint = ("\n(if this is on a network or external drive, it may not be mounted in WSL)"
+                    if str(p).startswith("/mnt/") else "")
+            sys.exit(f"Images folder not found: {p}{hint}")
+        if has_images(p):
+            runs.append(p)
+            continue
+        found = False
+        for sub in sorted(q for q in p.iterdir() if q.is_dir()):
+            if has_images(sub):
+                runs.append(sub)
+                found = True
+            elif RUN_TIMESTAMP.match(sub.name):
+                empty.append((sub.name, "no images (archived or empty)"))
+        if not found:
+            sys.exit(f"No images in {win_display(p) or p}, and no run folders with images "
+                     "inside it.")
+    runs = list({r.resolve(): r for r in runs}.values())   # same folder given twice
+    if len(runs) > 1:
+        undated = [r.name for r in runs if not RUN_TIMESTAMP.match(r.name)]
+        if undated:
+            sys.exit("Can't order these runs: their names don't start with the robot's "
+                     "<YYYYMMDDHHMMSS>_ timestamp:\n  " + "\n  ".join(undated) +
+                     "\nRename them, or sort them one at a time, oldest first.")
+        runs.sort(key=lambda r: RUN_TIMESTAMP.match(r.name).group(1))
+    return runs, empty
+
+
+# ---------- sorted-runs ledger ----------
+# Sorting a run twice appends its frames to the experiments twice, so the store records
+# every run it has sorted. It lives inside the store (data/), so it travels with the data
+# and survives clearing ~/.cache.
+def ledger_file(store):
+    return store / "data" / "sorted_runs.json"
+
+
+def load_ledger(store):
+    try:
+        return json.loads(ledger_file(store).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def record_sorted(store, name, source, how="sorted"):
+    ledger = load_ledger(store)
+    ledger[name] = {how: datetime.now().isoformat(timespec="seconds"), "source": source}
+    ledger_file(store).parent.mkdir(parents=True, exist_ok=True)
+    ledger_file(store).write_text(json.dumps(ledger, indent=2))
+
+
+def already_sorted(store, ledger, names):
+    """How a run was recorded as sorted, or None. Runs sorted with --archive before the
+    ledger existed are recognised by their archived copy."""
+    for n in names:
+        if n in ledger:
+            e = ledger[n]
+            return f"{'marked sorted' if 'marked' in e else 'sorted'} {e.get('sorted') or e.get('marked')}"
+        if (store / "data" / "unsorted_unlabeled_processed" / n).is_dir():
+            return "archived in the store"
+    return None
+
+
+def exp_dirs(store, sub):
+    d = store / "data" / "master_data" / sub
+    return {p.name for p in d.iterdir() if p.is_dir() and not p.name.startswith(".")} \
+        if d.is_dir() else set()
+
+
+def finish_collisions(store):
+    """Labels in both current_exp/ and finished_exp/. When such an experiment finishes, the
+    pipeline's move into finished_exp/ fails -- crashing the run, or rendering the old
+    folder's video -- so these must be cleared before sorting on."""
+    return sorted(exp_dirs(store, "current_exp") & exp_dirs(store, "finished_exp"))
+
+
+def collision_message(store, labels):
+    fin = store / "data" / "master_data" / "finished_exp"
+    return ("These experiments are in BOTH current_exp/ and finished_exp/: "
+            f"{', '.join(labels)}\n"
+            "Finishing them would collide with the old finished folder (crash, or a video of the\n"
+            "old data). Usually the old one is from a recycled QR label. Rename or move the old\n"
+            f"folder(s) out of:\n  {win_display(fin) or fin}\n"
+            "then run the same command again (runs already sorted are skipped).")
 
 
 def nf_base(sort_path, work_dir, revision, archive=False):
@@ -330,30 +445,10 @@ def finish_report(sort_path, before, dest, wsl):
 
 
 # ---------- modes ----------
-def do_sort(a, wsl, interactive):
-    img_prompt = "Images folder" + (" (paste the Windows C:\\ path)" if wsl else "")
-    images = to_path(a.images if a.images else ask(img_prompt), "Images folder")
-    if not images.is_dir():
-        hint = ("\n(if this is on a network or external drive, it may not be mounted in WSL)"
-                if str(images).startswith("/mnt/") else "")
-        sys.exit(f"Images folder not found: {images}{hint}")
-    source_name = images.name
-
-    store = resolve_store(a, interactive)
-    work_dir = work_dir_for(store)
-
-    if a.overwrite and store.exists():
-        if not interactive or ask_yes(
-                f"Delete and recreate the ENTIRE location at {win_display(store) or store} "
-                "(wipes all experiments)?", default=False):
-            shutil.rmtree(store)
-
-    # Imaging geometry: the robot encodes it in the folder name as
-    # <timestamp>_<shelves>_<boxes> (boxes = the final segment, shelves the one before it).
-    # --shelves / --boxes-per-shelf override; remembered boxes (per location) is a fallback.
+def run_geometry(a, folder, meta):
+    """(shelves, boxes, staged_name) for one run; exits with a clear message if unreadable."""
+    source_name = folder.name
     name_shelves, name_boxes = derive_geometry(source_name)
-    meta = load_meta(store)
-
     shelves = a.shelves if a.shelves else name_shelves
     if shelves is None:
         sys.exit(f"Couldn't read the shelf count from folder name '{source_name}'.\n"
@@ -363,35 +458,25 @@ def do_sort(a, wsl, interactive):
     if not (1 <= shelves <= 99):
         sys.exit(f"Implausible shelf count ({shelves}) read from '{source_name}'.\n"
                  "If the folder name's trailing _<shelves>_<boxes> is wrong, pass --shelves N.")
-
     boxes = a.boxes_per_shelf or name_boxes or meta.get("boxes_per_shelf")
     if not boxes:
-        boxes = ask("Boxes per shelf", default=2, cast=int, ok=lambda v: v > 0)
+        boxes = ask(f"Boxes per shelf for {source_name}", default=2, cast=int, ok=lambda v: v > 0)
     boxes = int(boxes)
-
-    shelf_src = ("--shelves override" if a.shelves
-                 else f"from folder name {source_name!r}" if name_shelves else "fallback")
-    box_src = ("--boxes-per-shelf override" if a.boxes_per_shelf
-               else "from folder name" if name_boxes else "remembered/asked")
-    print(f"-> Using {shelves} shelf(s) ({shelf_src}) x {boxes} box(es)/shelf ({box_src}).")
-    if a.stabilize is not None:
-        stabilize = a.stabilize
-    else:
-        stabilize = meta.get("stabilize", True)
-
-    store.mkdir(parents=True, exist_ok=True)
-    save_meta(store, {"boxes_per_shelf": boxes, "stabilize": stabilize})
-
     # The pipeline reads geometry from the staged folder name, so it must end in
     # '_<shelves>_<boxes>'. Robot folders already do; otherwise append it (needed for
-    # --shelves/--boxes-per-shelf overrides / non-conventional names). Staging lives in the
-    # cache -- NOT the location -- so the location only ever holds data/.
+    # --shelves/--boxes-per-shelf overrides / non-conventional names).
     geo_suffix = f"_{shelves}_{boxes}"
     staged_name = source_name if source_name.endswith(geo_suffix) else source_name + geo_suffix
+    return shelves, boxes, staged_name
+
+
+def sort_one(a, store, work_dir, folder, shelves, boxes, staged_name, stabilize):
+    """Run the pipeline on one run folder. Returns True on success."""
+    # Staging lives in the cache -- NOT the location -- so the location only ever holds data/.
     staged = cache_subdir("staging") / staged_name
     if staged.is_symlink() or staged.exists():
         staged.unlink()
-    staged.symlink_to(images, target_is_directory=True)
+    staged.symlink_to(folder, target_is_directory=True)
 
     # Defensive: clear transient ingest residue left by an interrupted prior run with this name
     # (the pipeline's copytree into unsorted_unlabeled/<name> errors if it already exists).
@@ -400,29 +485,140 @@ def do_sort(a, wsl, interactive):
         if leftover.exists():
             shutil.rmtree(leftover, ignore_errors=True)
 
-    if a.archive:
-        # Archiving moves the raw run out of the source folder into the location's
-        # data/unsorted_unlabeled_processed/ AFTER images are copied in for sorting. The
-        # source folder ends up empty -- safe (the images live in the location now), but the
-        # original location is consumed. Confirm interactively since it's not reversible there.
-        src_disp = win_display(images) or images
-        print(f"NOTE: --archive will MOVE (empty) the source folder after sorting:\n  {src_disp}")
-        if interactive and not ask_yes("Proceed and archive (empty) the source folder?", default=True):
-            sys.exit("Cancelled.")
-
-    before = stabilized_videos(store)
     cmd = nf_base(store, work_dir, a.revision, archive=a.archive) + [
         "--images_path", str(staged),
         "--boxes_per_shelf", str(boxes),
         "--stabilize", "true" if stabilize else "false",
     ]
-    print(f"\n-> Sorting {source_name} into {win_display(store) or store}  "
+    print(f"\n-> Sorting {folder.name} into {win_display(store) or store}  "
           f"({boxes} boxes x {shelves} shelves"
           f"{'; archiving source after' if a.archive else ''})...")
-    run_step(cmd, cache_subdir("run"))
+    return run_step(cmd, cache_subdir("run"), fatal=False)
 
-    dest = resolve_dest(a, wsl, interactive)
+
+def do_sort(a, wsl, interactive):
+    """Sort one or more runs into the store, oldest first.
+
+    Each sort finishes (moves to finished_exp + renders) every experiment that run added
+    nothing to -- the robot stopped imaging it -- so sorting runs in time order gives each
+    experiment that ended along the way its video. Experiments still being imaged in the
+    newest run stay in current_exp/ unless --finish-remaining.
+    """
+    img_prompt = ("Images folder -- one run, or a folder of runs" +
+                  (" (paste the Windows C:\\ path)" if wsl else ""))
+    runs, empty = collect_runs(a.images if a.images else [ask(img_prompt)])
+
+    store = resolve_store(a, interactive)
+    work_dir = work_dir_for(store)
+    where = win_display(store) or store
+
+    if a.overwrite and store.exists():
+        if not interactive or ask_yes(
+                f"Delete and recreate the ENTIRE location at {where} "
+                "(wipes all experiments)?", default=False):
+            shutil.rmtree(store)
+    store.mkdir(parents=True, exist_ok=True)
+
+    meta = load_meta(store)
+    ledger = load_ledger(store)
+    plan, skipped = [], list(empty)
+    for folder in runs:
+        shelves, boxes, staged_name = run_geometry(a, folder, meta)
+        done = already_sorted(store, ledger, {folder.name, staged_name})
+        if done and not a.resort:
+            skipped.append((folder.name, f"already sorted ({done})"))
+        else:
+            plan.append((folder, shelves, boxes, staged_name))
+
+    if a.mark_sorted:   # record runs sorted before the ledger existed; sort nothing
+        for folder, _, _, staged_name in plan:
+            record_sorted(store, staged_name, str(win_display(folder) or folder), how="marked")
+            print(f"  marked as sorted: {folder.name}")
+        for name, why in skipped:
+            print(f"  skipped: {name} -- {why}")
+        return
+
+    print(f"\nRuns to sort into {where}, oldest first:")
+    for i, (folder, shelves, boxes, _) in enumerate(plan, 1):
+        print(f"  {i}. {folder.name}  ({shelves} shelf(s) x {boxes} box(es))")
+    for name, why in skipped:
+        print(f"  -  {name}: skipped, {why}")
+    if not plan:
+        print("Nothing to sort." + ("  (Use --resort to sort a run again.)" if skipped else ""))
+        return
+    if a.resort and any(already_sorted(store, ledger, {f.name, s}) for f, _, _, s in plan):
+        print("NOTE: --resort -- a run sorted again appends its frames to its experiments again.")
+
+    finish_remaining = a.finish_remaining
+    if finish_remaining is None:
+        finish_remaining = interactive and ask_yes(
+            "After the last run, also make videos for experiments still being imaged in it?",
+            default=False)
+    if interactive and (len(plan) > 1 or skipped) and not ask_yes(
+            f"Sort {'these ' + str(len(plan)) + ' runs in this order' if len(plan) > 1 else 'this run'}?",
+            default=True):
+        sys.exit("Cancelled.")
+
+    if a.archive:
+        # Archiving moves each raw run out of its source folder into the location's
+        # data/unsorted_unlabeled_processed/ AFTER images are copied in for sorting. The
+        # source folders end up empty -- safe (the images live in the location now), but the
+        # original locations are consumed. Confirm interactively since it's not reversible there.
+        print("NOTE: --archive will MOVE (empty) each source folder after it is sorted.")
+        if interactive and not ask_yes("Proceed and archive (empty) the source folders?", default=True):
+            sys.exit("Cancelled.")
+
+    clash = finish_collisions(store)
+    if clash:
+        sys.exit(collision_message(store, clash))
+
+    stabilize = a.stabilize if a.stabilize is not None else meta.get("stabilize", True)
+    dest = resolve_dest(a, wsl, interactive)   # asked up front, not after hours of sorting
+    before = stabilized_videos(store)
+    sorted_ok, stop = [], None
+    for i, (folder, shelves, boxes, staged_name) in enumerate(plan):
+        save_meta(store, {"boxes_per_shelf": boxes, "stabilize": stabilize})
+        if not sort_one(a, store, work_dir, folder, shelves, boxes, staged_name, stabilize):
+            stop = f"Sorting {folder.name} failed -- see the Nextflow output above."
+            break
+        record_sorted(store, staged_name, str(win_display(folder) or folder))
+        sorted_ok.append(folder.name)
+        last = i == len(plan) - 1
+        # The next sort starts by deleting junk_review/ (clear_junk), and this one skipped
+        # finishing because of it -- so stop here rather than lose those folders.
+        if junk_review_items(store) and (not last or finish_remaining):
+            stop = (f"{folder.name} parked folders in junk review (see below). The next sort "
+                    "would delete them, so stopping here.")
+            break
+        clash = finish_collisions(store)
+        if clash and (not last or finish_remaining):
+            stop = collision_message(store, clash)
+            break
+
+    if not stop and finish_remaining:
+        remaining = sorted(exp_dirs(store, "current_exp"))
+        if remaining:
+            exps = ",".join(remaining)
+            print(f"\n-> Finishing experiments still being imaged in the newest run: {exps}")
+            cmd = nf_base(store, work_dir, a.revision) + [
+                "--images_path", str(cache_subdir("staging", "_finish_placeholder")),
+                "--boxes_per_shelf", str(plan[-1][2]),
+                "--stabilize", "true" if stabilize else "false",
+                "--finish_experiments", exps,
+            ]
+            if not run_step(cmd, cache_subdir("run"), fatal=False):
+                stop = "Finishing the remaining experiments failed -- see the Nextflow output above."
+
     finish_report(store, before, dest, wsl)
+    if len(plan) > 1 or stop:
+        print(f"\n  Sorted {len(sorted_ok)} of {len(plan)} run(s): {', '.join(sorted_ok) or 'none'}")
+    if stop:
+        print(f"\nSTOPPED: {stop}")
+        print("Fix that, then run the same command again: runs already sorted are skipped.")
+        sys.exit(1)
+    if not finish_remaining and exp_dirs(store, "current_exp"):
+        print("  Experiments still being imaged stay in current_exp/ until a later run adds "
+              "nothing to them (or use --mode finish / --finish-remaining).")
 
 
 def do_finish(a, wsl, interactive, mode):
@@ -473,7 +669,10 @@ def main():
     ap.add_argument("--out", help="(advanced) Working store dir on the fast local disk, "
                                   "auto-managed; defaults to ~/image-sort-data. You normally "
                                   "don't set this -- finished videos come out via --dest.")
-    ap.add_argument("--images", help="[sort] Images folder for this run (Windows or WSL path).")
+    ap.add_argument("--images", nargs="+",
+                    help="[sort] Run folder(s), or a folder containing run folders (Windows or "
+                         "WSL paths). Several runs are sorted oldest first, by the timestamp at "
+                         "the start of each folder name; runs already sorted are skipped.")
     ap.add_argument("--exp", help="[finish] Experiment number(s) to finalize, comma-separated.")
     ap.add_argument("--boxes-per-shelf", type=int,
                     help="[sort] Override boxes per shelf (normally read from the folder name; "
@@ -491,6 +690,18 @@ def main():
                          "the location's data/unsorted_unlabeled_processed/ (empties the source).")
     ap.add_argument("--overwrite", action="store_true",
                     help="[sort] Delete and recreate the ENTIRE output location before sorting.")
+    ap.add_argument("--finish-remaining", dest="finish_remaining", action="store_true",
+                    default=None,
+                    help="[sort] After the last run, also make videos for the experiments still "
+                         "being imaged in it (default: leave them for a later run).")
+    ap.add_argument("--no-finish-remaining", dest="finish_remaining", action="store_false",
+                    help="[sort] Don't ask; leave experiments still being imaged in current_exp/.")
+    ap.add_argument("--resort", action="store_true",
+                    help="[sort] Sort runs even if already sorted into this store (appends their "
+                         "frames again).")
+    ap.add_argument("--mark-sorted", action="store_true",
+                    help="[sort] Record the given runs as already sorted, without sorting -- for "
+                         "runs sorted before this store kept a record.")
     ap.add_argument("--revision", default=REVISION, help="Pipeline git revision to run (advanced).")
     a = ap.parse_args()
 
@@ -506,7 +717,7 @@ def main():
             mode = "sort"
         elif interactive:
             print("What would you like to do?")
-            print("  1) Sort a new run into your output location")
+            print("  1) Sort run(s) into your output location")
             print("  2) Finish specific experiments (make videos)")
             print("  3) Finish all experiments (turn over the location)")
             mode = {"1": "sort", "2": "finish", "3": "finish-all"}[

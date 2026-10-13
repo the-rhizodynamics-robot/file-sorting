@@ -73,6 +73,14 @@ image-sort --mode sort \
 image-sort --mode sort \
   --images 'C:\Users\you\Desktop\20260613120000_3_8' --archive
 
+# several runs at once: list them, or point at the folder that holds them. They are sorted
+# OLDEST FIRST (by the timestamp at the start of each folder name), and runs already sorted
+# into this store are skipped -- so pointing at the same folder again only picks up new runs.
+image-sort --mode sort --images 'C:\Users\you\Desktop\robotic_imaging' \
+  --dest 'C:\Users\you\Desktop\barley_videos'
+# ...and also make videos for the boxes still being imaged in the newest run
+image-sort --mode sort --images 'C:\Users\you\Desktop\robotic_imaging' --finish-remaining
+
 # later: finish specific experiments, or turn the whole store over
 image-sort --mode finish     --exp 100001,100002 --dest 'C:\Users\you\Desktop\barley_videos'
 image-sort --mode finish-all                     --dest 'C:\Users\you\Desktop\barley_videos'
@@ -359,6 +367,26 @@ nextflow run main.nf -profile local \
 On **Windows**, a local clone needs LF line endings on the `bin/` scripts or it hits the
 `python3\r` error above — add a `.gitattributes` forcing `*.py`/`*.sh` to `eol=lf`, or
 strip CRs from `bin/` before running. Running from GitHub avoids this entirely.
+
+### Sorting several runs (e.g. an experiment interrupted and restarted)
+
+Give `image-sort` several run folders, or a folder containing them. Each run is sorted in turn,
+**oldest first**: the QR label joins every run's frames for a box into one experiment, in the order
+the runs are sorted, so order is the experiment's timeline. Never merge run folders by hand — each
+run's frame numbers restart at zero, and frames are dealt to box positions by frame order, so a
+merged folder mixes boxes.
+
+- **Videos:** an experiment that a later run in the batch adds nothing to is finished and rendered
+  as usual. Experiments still being imaged in the **newest** run stay in `current_exp/` so the next
+  run can extend them, unless you pass `--finish-remaining` (the menu asks).
+- **Each run is sorted once.** The store records every run it sorts in `data/sorted_runs.json`
+  and skips them next time (`--resort` overrides; it appends the frames again). Runs sorted with
+  `--archive` before this record existed are recognised from their archived copy; mark other
+  previously sorted runs with `--mark-sorted --images <run> …`.
+- **It stops instead of losing data:** if a run fails, if a run parks folders in `junk_review/`
+  (the next sort would delete them), or if an experiment would collide with an old
+  `finished_exp/<label>` folder (a recycled QR label). Fix it and run the same command again — the
+  runs already sorted are skipped.
 
 ### Finishing experiments and videos
 
