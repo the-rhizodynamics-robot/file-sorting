@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/the-rhizodynamics-robot/file-sortin
 Point it at the folder that holds the robot's run folders:
 
 ```bash
-image-sort --images 'C:\Users\zhu.lab\Desktop\robotic_imaging'
+image-sort --images 'C:\Users\you\Desktop\robotic_imaging'
 ```
 
 Or just type `image-sort` and choose **1) Sort run(s)** from the menu.
@@ -98,7 +98,7 @@ The tool only remembers runs it has sorted since this update. If you sorted a ru
 added twice:
 
 ```bash
-image-sort --mark-sorted --images 'C:\Users\zhu.lab\Desktop\robotic_imaging\20260902080000_1_8'
+image-sort --mark-sorted --images 'C:\Users\you\Desktop\robotic_imaging\20260902080000_1_8'
 ```
 
 ---
