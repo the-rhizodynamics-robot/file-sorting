@@ -82,13 +82,46 @@ def _gray(path):
     return g
 
 
-def measure_offsets(paths, ref_index=1, search=500, binarize=True, min_score=0.5):
+def widen_to(search, shape):
+    """Search reaches to try in turn: the normal one, double, then the whole frame."""
+    return [search, 2 * search, max(shape)]
+
+
+def _match(g, tmpl, box, around, reach, binarize):
+    """((dx, dy), score) of the template within `reach` px of the box shifted by `around`,
+    or None if the peak sits on a search limit (the label may lie beyond it). A window
+    edge that is the frame's own edge doesn't count: widening can't help there."""
+    x0, y0, x1, y1 = box
+    h, w = g.shape
+    cx, cy = int(round(around[0])), int(round(around[1]))
+    sx0, sy0 = max(x0 + cx - reach, 0), max(y0 + cy - reach, 0)
+    sx1, sy1 = min(x1 + cx + reach, w), min(y1 + cy + reach, h)
+    if sx1 - sx0 < tmpl.shape[1] or sy1 - sy0 < tmpl.shape[0]:
+        return None
+    win = prepare(g[sy0:sy1, sx0:sx1], binarize).astype(np.float32)
+    r = cv2.matchTemplate(win, tmpl, cv2.TM_CCOEFF_NORMED)
+    _, score, _, (j, i) = cv2.minMaxLoc(r)
+    limit = ((i == 0 and sy0 > 0) or (i == r.shape[0] - 1 and sy1 < h) or
+             (j == 0 and sx0 > 0) or (j == r.shape[1] - 1 and sx1 < w))
+    if limit:
+        return None
+    fi, fj = _subpixel(r, i, j)
+    return (sx0 + fj - x0, sy0 + fi - y0), score
+
+
+def measure_offsets(paths, ref_index=1, search=500, binarize=True, min_score=0.5,
+                    jump_px=200, log=print):
     """Per-frame (dx, dy) of the QR label, re-referenced to the median position.
 
     paths: the box's frames, in time order. ref_index: frame the
     template is cut from -- not frame 0, the first cycle, whose light warm-up and cold
-    calibration make it atypical. Returns (offsets Nx2, scores N); frames whose match scores
-    below min_score or lands on the search boundary get NaN (callers hold the last good one).
+    calibration make it atypical. Each frame is searched within `search` px of the previous
+    match; a miss (score below min_score, or the peak on a search limit) retries at double
+    the reach, then the whole frame. A frame still unmatched holds the previous offset.
+    Widened searches, unmatched frames and frame-to-frame jumps over jump_px are reported
+    through `log`, since they usually mean the box itself was moved (camera jitter jumped at
+    most ~120 px between frames on the College Station rig).
+    Returns (offsets Nx2, scores N).
     """
     ref_index = min(ref_index, len(paths) - 1)
     ref = _gray(paths[ref_index])
@@ -97,23 +130,38 @@ def measure_offsets(paths, ref_index=1, search=500, binarize=True, min_score=0.5
         raise ValueError("no QR label found in reference frame %d" % ref_index)
     x0, y0, x1, y1 = box
     tmpl = prepare(ref, binarize)[y0:y1, x0:x1].astype(np.float32)
-    h, w = ref.shape
-    sx0, sy0 = max(x0 - search, 0), max(y0 - search, 0)
-    sx1, sy1 = min(x1 + search, w), min(y1 + search, h)
     offsets, scores = np.full((len(paths), 2), np.nan), np.zeros(len(paths))
+    last = (0.0, 0.0)          # search around the previous match, so after a box move only
+    widened, rejected = [], [] # the first moved frame needs a wider search
     for k, path in enumerate(paths):
-        win = prepare(_gray(path)[sy0:sy1, sx0:sx1], binarize).astype(np.float32)
-        r = cv2.matchTemplate(win, tmpl, cv2.TM_CCOEFF_NORMED)
-        _, score, _, (j, i) = cv2.minMaxLoc(r)
-        scores[k] = score
-        on_edge = i in (0, r.shape[0] - 1) or j in (0, r.shape[1] - 1)
-        if score < min_score or on_edge:
+        g = _gray(path)
+        for level, reach in enumerate(widen_to(search, g.shape)):
+            hit = _match(g, tmpl, (x0, y0, x1, y1), last, reach, binarize)
+            if hit is not None and hit[1] >= min_score:
+                break
+        else:
+            hit = None
+        if hit is None:
+            rejected.append(k)
             continue
-        fi, fj = _subpixel(r, i, j)
-        offsets[k] = (sx0 + fj - x0, sy0 + fi - y0)
+        offsets[k], scores[k] = hit
+        last = tuple(offsets[k])
+        if level:
+            widened.append((k, int(round(offsets[k, 0])), int(round(offsets[k, 1]))))
     good = ~np.isnan(offsets[:, 0])
     if not good.any():
         raise ValueError("QR label not matched in any frame")
+    if widened:
+        log("qr_stabilize: %d frame(s) needed a wider search -- a moved box? "
+            "(frame, dx, dy): %s" % (len(widened), widened[:20]))
+    if rejected:
+        log("qr_stabilize: WARNING label not found in %d frame(s), held the previous offset: "
+            "%s" % (len(rejected), rejected[:50]))
+    steps = np.abs(np.diff(offsets[good], axis=0)).max(axis=1)
+    jumps = [int(np.where(good)[0][i + 1]) for i in np.where(steps > jump_px)[0]]
+    if jumps:
+        log("qr_stabilize: label jumped more than %d px at frame(s) %s -- more than camera "
+            "jitter; check whether the box was moved" % (jump_px, jumps[:20]))
     for k in range(len(offsets)):   # hold the last good offset over rejected frames
         if not good[k]:
             prev = np.where(good[:k])[0]
