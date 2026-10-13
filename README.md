@@ -13,6 +13,8 @@ into the image.
 
 ## Quickstart
 
+> **Just want to make videos?** See the short [operator manual](MANUAL.md).
+
 Process a robot run in a few minutes from a Linux/WSL shell.
 
 **Requirements**
