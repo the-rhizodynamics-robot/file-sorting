@@ -122,6 +122,14 @@ Given a folder (or zip) of raw images from one robot run, the pipeline:
    re-merges reviewed items on the next run.
 5. **Builds time-lapse videos** for each finished experiment and, by default,
    **stabilizes** them (`--stabilize`) so the root — not camera jitter — is what moves.
+   Stabilization tracks the box's **QR label** (`bin/src/qr_stabilize.py`): each frame is shifted
+   (translation only, no zoom) by the label's measured offset × the rig's parallax factor
+   (`--stab_parallax`, default 0.907 for the College Station rig: the label sits nearer the camera
+   than the seeds, so it moves ~10 % further). The per-frame offsets are saved as
+   `finished_exp/<box>/stabilization.json`, keyed by frame filename, so root-tracking can stabilize
+   the same frames exactly. If a box's label can't be found it falls back to ffmpeg vid.stab, which
+   drifts up to ~100 px over a video and zooms by an unrecorded amount, so don't measure from
+   vid.stab videos.
 6. **Archives** the consumed raw run into the store's processed area (`--archive`).
 
 Outputs land under your `--sort_path` in a fixed directory layout (see
@@ -427,6 +435,7 @@ requires a path — point it at any existing directory.
 | `--boxes_per_shelf` | `3` | Containers per shelf, used to sort frames into experiments. Overridden by the `…_<shelves>_<boxes>` suffix of the folder name when present. |
 | `--unzip` | `true` | Treat `images_path` as a zip and unzip it first. Set `false` for a plain folder. |
 | `--stabilize` | `true` | Stabilize the generated time-lapse videos. |
+| `--stab_parallax` | `0.907` | Seed-plane shift ÷ label shift for QR stabilization. Rig-specific (working distance, vessel); 0.907 was measured on the College Station rig. |
 | `--finish_only` | `false` | Skip ingest/sort; finalize **all** experiments in `current_exp/` and (re)build videos. |
 | `--finish_experiments` | `""` | Skip ingest/sort; finalize only the comma-separated experiment numbers (e.g. `100001,100002`). |
 | `--archive` | `true` | On success, move the consumed raw run into `data/unsorted_unlabeled_processed/`. |
@@ -454,7 +463,7 @@ data/
     unsorted_unlabeled/
     sorted_unlabeled/
     current_exp/                  # experiments in progress
-    finished_exp/                 # completed experiments (each carries the run's run_config.json)
+    finished_exp/                 # completed experiments (each carries run_config.json + stabilization.json)
     junk_exp/
     junk_review/                  # ambiguous items awaiting human review
   videos/

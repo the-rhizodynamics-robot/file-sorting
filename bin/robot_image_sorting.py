@@ -44,6 +44,9 @@ parser.add_argument("-s", "--stabilize",
 parser.add_argument("-u", "--unzip",
                     help="Unzip the images",
                     action="store_true")
+parser.add_argument("--parallax", type=float, default=None,
+                    help="QR stabilization: seed-plane shift / label shift for this rig "
+                         "(default: the College Station value, 0.907)")
 parser.add_argument("-e", "--finish_experiments",
                     action="store",
                     dest="finish_experiments",
@@ -106,10 +109,10 @@ current_exp_list = []
 
 if args.finish_experiments:
     exp_list = [e.strip() for e in args.finish_experiments.split(",") if e.strip()]
-    sf.finish_experiments(exp_list, stabilize = args.stabilize)
+    sf.finish_experiments(exp_list, stabilize = args.stabilize, parallax = args.parallax)
 elif args.finish_only:
     current_exp_list = sf.update(current_exp_list)
-    sf.final_transfer(current_exp_list, stabilize = args.stabilize)
+    sf.final_transfer(current_exp_list, stabilize = args.stabilize, parallax = args.parallax)
 else:
 
     # move images to unsorted_unlabeled
@@ -124,6 +127,6 @@ else:
     review_needed = sf.junk_review()
 
     if not review_needed:
-        sf.final_transfer(current_exp_list, stabilize = args.stabilize)
+        sf.final_transfer(current_exp_list, stabilize = args.stabilize, parallax = args.parallax)
     else:
         print("skipping final transfer, there are junk review items to be dealt with\n*****************")

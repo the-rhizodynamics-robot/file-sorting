@@ -8,8 +8,12 @@ and shifting each frame back is exact for that kind of motion, where generic sta
 (vid.stab) fits a whole-frame motion model to a mostly transparent, partly changing scene,
 smooths the path, and zooms (changing the image scale by an unrecorded amount).
 
-    offsets, scores = measure_offsets(paths)     # (dx, dy) per frame, sub-pixel
+    stabilize_experiment(folder, "out.mp4")      # all of the below, plus stabilization.json
+    offsets, scores, info = measure_offsets(paths)   # (dx, dy) per frame, sub-pixel
     write_video(paths, offsets, "out.mp4")       # shift, crop to the common area, encode once
+
+stabilization.json, written into the experiment folder beside its frames, records each frame's
+label offset keyed by filename, so root-tracking can stabilize the same frames exactly.
 
 Frames are read from disk one at a time: a box of 3000x3000 frames is ~3 GB in memory.
 
@@ -24,12 +28,17 @@ so another rig needs its own value.
 
 Python 3.7-compatible (the processing container).
 """
+import json
+import os
 import subprocess
 
 import cv2
 import numpy as np
 
 PARALLAX_COLLEGE_STATION = 0.907   # seed-plane shift / label shift; see module docstring
+OFFSETS_NAME = "stabilization.json"
+OFFSETS_FORMAT = "qr-stabilization/1"
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
 
 def locate_label(gray, margin=40):
@@ -121,7 +130,8 @@ def measure_offsets(paths, ref_index=1, search=500, binarize=True, min_score=0.5
     Widened searches, unmatched frames and frame-to-frame jumps over jump_px are reported
     through `log`, since they usually mean the box itself was moved (camera jitter jumped at
     most ~120 px between frames on the College Station rig).
-    Returns (offsets Nx2, scores N).
+    Returns (offsets Nx2, scores N, info) with info = {"widened", "rejected", "jumps"}: frame
+    indices that needed a wider search, weren't matched, or jumped over jump_px.
     """
     ref_index = min(ref_index, len(paths) - 1)
     ref = _gray(paths[ref_index])
@@ -167,7 +177,8 @@ def measure_offsets(paths, ref_index=1, search=500, binarize=True, min_score=0.5
             prev = np.where(good[:k])[0]
             offsets[k] = offsets[prev[-1]] if len(prev) else offsets[np.where(good)[0][0]]
     offsets -= np.median(offsets[good], axis=0)   # no single frame becomes the baseline
-    return offsets, scores
+    info = {"widened": [w[0] for w in widened], "rejected": rejected, "jumps": jumps}
+    return offsets, scores, info
 
 
 def common_crop(shape, offsets):
@@ -209,3 +220,45 @@ def write_video(paths, offsets, out_path, fps=15, crf=24, parallax=1.0):
     if proc.wait() != 0:
         raise RuntimeError("ffmpeg failed writing " + out_path)
     return crop
+
+
+def write_offsets(folder, names, offsets, scores, info, parallax):
+    """Write stabilization.json into an experiment folder, keyed by frame filename.
+
+    Stores the RAW label offsets plus the parallax factor separately, so a reader can apply its
+    own factor without re-measuring. Keyed by name, not position, so a reader can tell when the
+    frames on disk no longer match.
+    """
+    rec = {
+        "format": OFFSETS_FORMAT,
+        "method": "qr-label template match, translation only",
+        "parallax": parallax,
+        "offsets_are": "label offset (px) from the median position; to stabilize, shift each "
+                       "frame back by offset * parallax",
+        "reference_frame": names[min(1, len(names) - 1)],
+        "frames": {n: [round(float(o[0]), 3), round(float(o[1]), 3), round(float(sc), 4)]
+                   for n, o, sc in zip(names, offsets, scores)},
+        "widened": [names[k] for k in info["widened"]],
+        "rejected": [names[k] for k in info["rejected"]],
+        "jumps": [names[k] for k in info["jumps"]],
+    }
+    path = os.path.join(folder, OFFSETS_NAME)
+    with open(path, "w") as f:
+        json.dump(rec, f, indent=1)
+    return path
+
+
+def stabilize_experiment(folder, out_path, parallax=PARALLAX_COLLEGE_STATION, fps=15, crf=24,
+                         log=print):
+    """Measure a finished experiment's frames, write stabilization.json beside them, and render
+    the stabilized video to out_path. Raises ValueError when there's no usable label (the
+    caller falls back to vid.stab)."""
+    names = sorted(n for n in os.listdir(folder)
+                   if n.lower().endswith(IMAGE_EXTENSIONS) and not n.startswith("."))
+    if len(names) < 2:
+        raise ValueError("fewer than 2 frames in %s" % folder)
+    paths = [os.path.join(folder, n) for n in names]
+    offsets, scores, info = measure_offsets(paths, log=log)
+    write_offsets(folder, names, offsets, scores, info, parallax)
+    write_video(paths, offsets, out_path, fps=fps, crf=crf, parallax=parallax)
+    return info

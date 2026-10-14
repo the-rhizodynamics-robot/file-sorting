@@ -21,6 +21,7 @@ from keras_retinanet import models
 from keras_retinanet.utils.image import preprocess_image, resize_image 
 import time
 from PIL import Image
+from src import qr_stabilize
 
 
 # Image file extensions the pipeline ingests. Used to (a) discover images
@@ -381,7 +382,46 @@ def update(current_list):
     return current_list
 
 
-def final_transfer(current_exp_list, stabilize = True):
+def make_videos(exp_name, stabilize = True, parallax = None):
+    """ Render a finished experiment's videos: unstabilized -> videos/unstabilized/<exp>.mp4,
+        stabilized -> videos/stabilized/<exp>.mp4.
+
+        Stabilization tracks the box's QR label (qr_stabilize.py): translation only, no zoom,
+        and it writes stabilization.json beside the frames so root-tracking can stabilize the
+        same frames exactly. If the label can't be used it falls back to ffmpeg vid.stab, which
+        slides up to ~100 px over a video and zooms by an unrecorded amount. """
+    if parallax is None:
+        parallax = qr_stabilize.PARALLAX_COLLEGE_STATION
+    start = time.time()
+    src = FINISHED_EXP_PATH + exp_name + "/"
+    os.chdir(src)
+    command = 'ffmpeg -framerate 15 -pattern_type glob -i \"' + "*" + _dominant_ext(src) + '\" -c:v libx264 -crf 24 -pix_fmt yuv420p outfile.mp4'
+    subprocess.call(command, shell=True)
+
+    if stabilize:
+        try:
+            info = qr_stabilize.stabilize_experiment(src, src + "outfile_stabilized.mp4", parallax=parallax)
+            print("Stabilized " + exp_name + " on its QR label (parallax " + str(parallax) + ")"
+                  + ("; CHECK: possible box move at " + str(len(info["jumps"])) + " frame(s)" if info["jumps"] else ""))
+        except Exception as e:
+            print("WARNING: QR stabilization failed for " + exp_name + " (" + str(e) + "); falling back to vid.stab")
+            command = 'ffmpeg -y -i outfile.mp4 -vf vidstabdetect=shakiness=5:accuracy=15:stepsize=6:mincontrast=0.1:result=transforms.trf -f null -'
+            subprocess.call(command, shell=True)
+            command = 'ffmpeg -y -i outfile.mp4 -vf vidstabtransform=input=transforms.trf:smoothing=30:optzoom=1 outfile_stabilized.mp4'
+            subprocess.call(command, shell=True)
+            if os.path.exists(src + "transforms.trf"):
+                os.remove(src + "transforms.trf")
+        shutil.copy(src + "outfile_stabilized.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
+        os.remove(src + "outfile_stabilized.mp4")
+    else:
+        shutil.copy(src + "outfile.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
+
+    shutil.copy(src + "outfile.mp4", FINAL_VIDEO_PATH + exp_name + ".mp4")
+    os.remove(src + "outfile.mp4")
+    print("Video processing time: ", time.time() - start)
+
+
+def final_transfer(current_exp_list, stabilize = True, parallax = None):
     if len(current_exp_list) == 0:
         current_exp_list = update(current_exp_list)
         print(current_exp_list)
@@ -403,38 +443,10 @@ def final_transfer(current_exp_list, stabilize = True):
 
                 write_run_manifest(FINISHED_EXP_PATH + current_exp_list[x][0]) # run settings travel with the experiment
 
-                # make video and move it
-                src = FINISHED_EXP_PATH + current_exp_list[x][0] + "/"
-                os.chdir(src)
-  
-                start = time.time()
-
-                src = FINISHED_EXP_PATH + current_exp_name + "/"
-                glob_pat = "*" + _dominant_ext(src)
-                os.chdir(src)
-                command = 'ffmpeg -framerate 15 -pattern_type glob -i \"' + glob_pat + '\" -c:v libx264 -crf 24 -pix_fmt yuv420p outfile.mp4'
-                subprocess.call(command,shell=True)
-                
-                if stabilize:
-                    command = 'ffmpeg -i outfile.mp4 -vf vidstabdetect=shakiness=5:accuracy=15:stepsize=6:mincontrast=0.1:result=transforms.trf -f null -'
-                    subprocess.call(command,shell=True)
-                    
-                    command = 'ffmpeg -i outfile.mp4 -vf vidstabtransform=input=transforms.trf:smoothing=30:optzoom=1 outfile_stabilized.mp4'
-                    subprocess.call(command,shell=True)
-
-                    shutil.copy(FINISHED_EXP_PATH + current_exp_list[x][0] + "/outfile_stabilized.mp4", STABILIZED_VIDEO_PATH + current_exp_name + ".mp4")
-                    os.remove(FINISHED_EXP_PATH + current_exp_list[x][0] + "/outfile_stabilized.mp4") 
-                    os.remove(FINISHED_EXP_PATH + current_exp_list[x][0] + "/transforms.trf")  
-                else:
-                    shutil.copy(FINISHED_EXP_PATH + current_exp_list[x][0] + "/outfile.mp4", STABILIZED_VIDEO_PATH + current_exp_name + ".mp4") 
-                
-                shutil.copy(FINISHED_EXP_PATH + current_exp_list[x][0] + "/outfile.mp4", FINAL_VIDEO_PATH + current_exp_name + ".mp4") 
-                os.remove(FINISHED_EXP_PATH + current_exp_list[x][0] + "/outfile.mp4")   
-                
-                print("Video processing time: ", time.time() - start)            
+                make_videos(current_exp_name, stabilize, parallax)
         
 
-def finish_experiments(exp_list, stabilize = True):
+def finish_experiments(exp_list, stabilize = True, parallax = None):
     """ Explicitly finalize the named experiments: move each from current_exp to finished_exp
         and render its video(s), regardless of whether new images were added this run. Names
         not present in current_exp are skipped with a warning. This mirrors the move+video
@@ -456,27 +468,7 @@ def finish_experiments(exp_list, stabilize = True):
 
         write_run_manifest(FINISHED_EXP_PATH + exp_name) # run settings travel with the experiment
 
-        start = time.time()
-        src = FINISHED_EXP_PATH + exp_name + "/"
-        glob_pat = "*" + _dominant_ext(src)
-        os.chdir(src)
-        command = 'ffmpeg -framerate 15 -pattern_type glob -i \"' + glob_pat + '\" -c:v libx264 -crf 24 -pix_fmt yuv420p outfile.mp4'
-        subprocess.call(command, shell=True)
-
-        if stabilize:
-            command = 'ffmpeg -i outfile.mp4 -vf vidstabdetect=shakiness=5:accuracy=15:stepsize=6:mincontrast=0.1:result=transforms.trf -f null -'
-            subprocess.call(command, shell=True)
-            command = 'ffmpeg -i outfile.mp4 -vf vidstabtransform=input=transforms.trf:smoothing=30:optzoom=1 outfile_stabilized.mp4'
-            subprocess.call(command, shell=True)
-            shutil.copy(FINISHED_EXP_PATH + exp_name + "/outfile_stabilized.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
-            os.remove(FINISHED_EXP_PATH + exp_name + "/outfile_stabilized.mp4")
-            os.remove(FINISHED_EXP_PATH + exp_name + "/transforms.trf")
-        else:
-            shutil.copy(FINISHED_EXP_PATH + exp_name + "/outfile.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
-
-        shutil.copy(FINISHED_EXP_PATH + exp_name + "/outfile.mp4", FINAL_VIDEO_PATH + exp_name + ".mp4")
-        os.remove(FINISHED_EXP_PATH + exp_name + "/outfile.mp4")
-        print("Video processing time: ", time.time() - start)
+        make_videos(exp_name, stabilize, parallax)
 
 
 def clear_junk():
