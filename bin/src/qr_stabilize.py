@@ -212,7 +212,7 @@ def write_video(paths, offsets, out_path, fps=15, crf=24, parallax=1.0):
             proc = subprocess.Popen(
                 ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
                  "-s", "%dx%d" % (x1 - x0, y1 - y0), "-r", str(fps), "-i", "-",
-                 "-c:v", "libx264", "-crf", str(crf), "-pix_fmt", "yuv420p", out_path],
+                 "-c:v", "libx264", "-threads", "4", "-crf", str(crf), "-pix_fmt", "yuv420p", out_path],
                 stdin=subprocess.PIPE)
         s = shift(f, offsets[k, 0], offsets[k, 1])
         proc.stdin.write(np.ascontiguousarray(s[y0:y1, x0:x1]).tobytes())
