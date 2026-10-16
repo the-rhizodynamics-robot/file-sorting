@@ -477,7 +477,7 @@ def make_videos(exp_name, stabilize = True, parallax = None):
     start = time.time()
     src = FINISHED_EXP_PATH + exp_name + "/"
     os.chdir(src)
-    command = 'ffmpeg -framerate 15 -pattern_type glob -i \"' + "*" + _dominant_ext(src) + '\" -c:v libx264 -threads 4 -crf 24 -pix_fmt yuv420p outfile.mp4'
+    command = 'ffmpeg -framerate 15 -pattern_type glob -i \"' + "*" + _dominant_ext(src) + '\" -c:v libx264 -preset faster -threads 4 -crf 24 -pix_fmt yuv420p outfile.mp4'
     subprocess.call(command, shell=True)
 
     if stabilize:
@@ -489,7 +489,7 @@ def make_videos(exp_name, stabilize = True, parallax = None):
             print("WARNING: QR stabilization failed for " + exp_name + " (" + str(e) + "); falling back to vid.stab")
             command = 'ffmpeg -y -threads 4 -i outfile.mp4 -vf vidstabdetect=shakiness=5:accuracy=15:stepsize=6:mincontrast=0.1:result=transforms.trf -f null -'
             subprocess.call(command, shell=True)
-            command = 'ffmpeg -y -threads 4 -i outfile.mp4 -vf vidstabtransform=input=transforms.trf:smoothing=30:optzoom=1 -threads 4 outfile_stabilized.mp4'
+            command = 'ffmpeg -y -threads 4 -i outfile.mp4 -vf vidstabtransform=input=transforms.trf:smoothing=30:optzoom=1 -c:v libx264 -preset faster -threads 4 outfile_stabilized.mp4'
             subprocess.call(command, shell=True)
             if os.path.exists(src + "transforms.trf"):
                 os.remove(src + "transforms.trf")
