@@ -120,6 +120,13 @@ Given a folder (or zip) of raw images from one robot run, the pipeline:
    bundled inference models (`qrInference.h5`, `SeedInference.h5`).
 4. **Routes** anything ambiguous to a `junk_review` area for a human to resolve, and
    re-merges reviewed items on the next run.
+   Before labelling, a **frame-order check** reads the QR code in ~8 frames spread across each
+   position folder (about a minute per run). Frames are dealt to positions purely by order, so a
+   frame dropped or added mid-run would mix two boxes in one folder and get them labelled as one.
+   - **Labels change partway through a folder:** the run **stops**, naming the frame where they
+     switch. Nothing is labelled or moved, and the source run is untouched.
+   - **Only the very first frame differs** (a stray trigger before the first sweep): that frame is
+     set aside in `junk_exp/` with a warning, and the run continues.
 5. **Builds time-lapse videos** for each finished experiment and, by default,
    **stabilizes** them (`--stabilize`) so the root — not camera jitter — is what moves.
    Stabilization tracks the box's **QR label** (`bin/src/qr_stabilize.py`): each frame is shifted

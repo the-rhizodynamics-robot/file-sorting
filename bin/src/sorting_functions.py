@@ -231,26 +231,7 @@ def label(base_path):
             img = cv2.imread(d + "/" + image_name, 0)
             box = box.astype(float)
             box = box.astype(int)
-            thr = []
-            blur = cv2.GaussianBlur(img[box[1]:box[3],box[0]:box[2]],(3,3),0)
-         
-            #try several preprocessing approaches and see if any work
-            thr.append(img)
-            thr.append(blur)
-            thr.append(cv2.adaptiveThreshold(blur, 255,cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY,69,2))
-            thr.append(cv2.adaptiveThreshold(blur, 255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,69,2))    
-            thr.append(cv2.threshold(blur, 0, 255, cv2.THRESH_OTSU)[1])    
-            thr.append(cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY,89,2))    
-            thr.append(cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY,31,11))   
-            thr.append(cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,55,11))   
-            
-            counter = 0
-            for t in thr:
-                barcode = decode(t, symbols=[ZBarSymbol.QRCODE])
-                if len(barcode)>0:
-                    print("threshold technique: " + str(counter))
-                    break
-                counter = counter + 1 
+            barcode = _decode_qr(img, box)
                 
             crop_sum = crop_sum + np.sum(img[box[1]:box[3],box[0]:box[2]])
             if len(barcode)>0:
@@ -296,6 +277,107 @@ def label(base_path):
     except Exception as e:
         print(e)
         
+def _decode_qr(img, box):
+    """zbar results for the QR in `box` of grayscale `img`, trying several preprocessings."""
+    blur = cv2.GaussianBlur(img[box[1]:box[3], box[0]:box[2]], (3, 3), 0)
+    thr = [img, blur,
+           cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 69, 2),
+           cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 69, 2),
+           cv2.threshold(blur, 0, 255, cv2.THRESH_OTSU)[1],
+           cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 89, 2),
+           cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 11),
+           cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 55, 11)]
+    for counter, t in enumerate(thr):
+        barcode = decode(t, symbols=[ZBarSymbol.QRCODE])
+        if len(barcode) > 0:
+            print("threshold technique: " + str(counter))
+            return barcode
+    return []
+
+
+def read_qr(image_path):
+    """The QR label in one frame, as label() would name it, or None if none can be read."""
+    box = qr_detection(image_path)
+    if len(box) == 0:
+        return None
+    barcode = _decode_qr(cv2.imread(image_path, 0), np.asarray(box).astype(float).astype(int))
+    if not barcode:
+        return None
+    return barcode[0][0].decode('utf-8', 'ignore').strip().replace('/', '_').replace('\\', '_')
+
+
+class FrameOrderError(RuntimeError):
+    """A position folder holds different boxes at different points in the run."""
+
+
+def check_positions(base_path, samples = 8):
+    """ Verify, before anything is labeled or moved, that each position folder holds ONE box.
+
+        sort() deals frames to positions purely by order, so a frame dropped or added
+        mid-run puts box A's frames and then box B's into the same folder, and label()
+        (one QR read per folder) would silently name it all after one of them. This reads
+        the QR in `samples` frames spread across each folder, first and last included
+        (~8 reads x positions per run). If the readable labels agree, the run goes on.
+        If only the very first frame disagrees -- a stray trigger before the first sweep
+        (seen on the A&M rig) -- that frame is set aside in junk_exp with a warning; a
+        leading shift like that leaves every other frame correctly grouped. Any other
+        disagreement is bisected to the frame where the label changes and raised as
+        FrameOrderError: nothing has been labeled or moved yet, and the source run is
+        untouched. """
+    run_dir = SORTED_UNLABELED_PATH + base_path
+    for pos in sorted(os.listdir(run_dir), key = lambda n: int(n) if n.isdigit() else 0):
+        folder = os.path.join(run_dir, pos)
+        files = sorted(listdir_nohidden(folder))
+        if not files:
+            continue
+        cache = {}
+        def lab(i):
+            if i not in cache:
+                cache[i] = read_qr(os.path.join(folder, files[i]))
+            return cache[i]
+        n = len(files)
+        idx = sorted(set(int(round(k * (n - 1) / max(samples - 1, 1))) for k in range(samples)))
+        reads = [(i, lab(i)) for i in idx]
+        readable = [(i, l) for i, l in reads if l is not None]
+        if len(readable) < 2:
+            print("position " + pos + ": too few readable QR codes to check (" + str(len(readable)) + ")")
+            continue
+        labels = [l for _, l in readable]
+        if len(set(labels)) == 1:
+            print("position " + pos + ": frame order OK (" + labels[0] + ", " + str(len(readable)) + " reads)")
+            continue
+        last = readable[-1][1]
+        # Only the first frame disagrees, and the next one already reads the right label: a stray lead frame.
+        if all(l == last for _, l in readable[1:]) and readable[0][0] == 0 and n > 1 and lab(1) == last:
+            dst = os.path.join(JUNK_EXP_PATH, "stray_first_frame_" + os.path.basename(os.path.normpath(base_path)) + "_pos" + pos)
+            os.makedirs(dst, exist_ok = True)
+            shutil.move(os.path.join(folder, files[0]), os.path.join(dst, files[0]))
+            print("WARNING position " + pos + ": the first frame reads '" + str(readable[0][1]) + "' but the rest read '"
+                  + last + "' -- a stray frame before the first sweep; set aside in " + dst)
+            continue
+        # Find the first change and bisect it down to the exact frame.
+        for (a, la), (b, lb) in zip(readable, readable[1:]):
+            if la != lb:
+                break
+        while b - a > 1:
+            m = (a + b) // 2
+            lm = lab(m)
+            if lm is None:  # unreadable: try its neighbours before giving up on narrowing further
+                lm = next((lab(j) for j in (m + 1, m - 1) if a < j < b and lab(j) is not None), None)
+                if lm is None:
+                    break
+            if lm == la:
+                a = m
+            else:
+                b = m
+        raise FrameOrderError(
+            "FRAME ORDER SHIFTED in run " + str(base_path) + ", position " + pos + ": frames up to #" + str(a)
+            + " read QR '" + str(la) + "', from #" + str(b) + " they read '" + str(lb) + "' (file " + files[b]
+            + "). A frame was probably dropped or added mid-run, so boxes would be mixed. Nothing was labeled"
+            + " or moved; the source run is untouched. Check the run around that point. Labels sampled: "
+            + ", ".join(str(i) + ":" + str(l) for i, l in reads))
+
+
 def qr_detection(image_path):
     
     confidence_cutoff = 0.1
