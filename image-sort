@@ -321,6 +321,46 @@ def already_sorted(store, ledger, names):
     return None
 
 
+RUN_STATUS_NAME = "run_status.json"   # written by robot-control's host every cycle
+RECENT_MIN = 30                        # no status file: a frame this recent = maybe still imaging
+
+
+def looks_in_progress(folder):
+    """Why this run may still be being imaged or copied, or None if it looks complete.
+
+    Sorting a run marks it sorted, so a run sorted part-way through imaging -- or while its
+    copy/upload is unfinished -- would never have its remaining frames picked up. With the
+    robot's run_status.json: "running" and updated within ~2 cycles = still imaging; fewer
+    frames on disk than it recorded = still copying. A run whose host died (reboot, crash)
+    stays "running" with a stale time, which counts as over. Without it (older runs): the
+    newest frame being under RECENT_MIN minutes old -- only meaningful on the capture PC, since
+    copies don't keep the robot's file times reliably."""
+    names = [n for n in os.listdir(folder)
+             if Path(n).suffix.lower() in IMAGE_EXTENSIONS and not n.startswith(".")]
+    status_path = folder / RUN_STATUS_NAME
+    if status_path.is_file():
+        try:
+            st = json.loads(status_path.read_text())
+        except (OSError, ValueError):
+            st = None
+        if st:
+            saved = int(st.get("frames_saved") or 0)
+            if len(names) < saved:
+                return ("only %d of the %d frames the robot saved are here -- still copying or "
+                        "uploading?" % (len(names), saved))
+            age = (datetime.now().timestamp() - float(st.get("updated_epoch", 0))) / 60
+            limit = 2 * float(st.get("cycle_interval_min") or 15) + 10
+            if st.get("state") == "running" and age < limit:
+                return "the robot was still imaging it %.0f min ago (run_status.json)" % age
+            return None
+    if names:
+        newest = max(names, key=lambda n: (len(n), n))   # frame number is the last field
+        age = (datetime.now().timestamp() - (folder / newest).stat().st_mtime) / 60
+        if age < RECENT_MIN:
+            return "its newest frame is %.0f min old -- the robot may still be imaging it" % age
+    return None
+
+
 def exp_dirs(store, sub):
     d = store / "data" / "master_data" / sub
     return {p.name for p in d.iterdir() if p.is_dir() and not p.name.startswith(".")} \
@@ -530,6 +570,29 @@ def do_sort(a, wsl, interactive):
         else:
             plan.append((folder, shelves, boxes, staged_name))
 
+    # Hold back a run that may still be being imaged or copied -- and every run after it, since
+    # sorting a later run first would put its frames ahead of the held-back one's.
+    if not a.mark_sorted:
+        for i, (folder, _, _, _) in enumerate(plan):
+            why = looks_in_progress(folder)
+            if not why:
+                continue
+            if a.include_recent:
+                print(f"NOTE: {folder.name} {why}; sorting it anyway (--include-recent).")
+                continue
+            hold = (not interactive) or ask_yes(
+                f"{folder.name}: {why}. Hold it back for now? (sorting it marks it sorted, so frames "
+                "added later would be missed)", default=True)
+            if hold:
+                newer = plan[i + 1:]
+                skipped += [(folder.name, "held back, looks in progress: " + why)] + [
+                    (f.name, "held back, newer than " + folder.name) for f, _, _, _ in newer]
+                plan = plan[:i]
+                print(f"WARNING: holding back {folder.name} ({why})"
+                      + (f" and {len(newer)} newer run(s)" if newer else "")
+                      + ". Use --include-recent to sort it anyway.")
+            break
+
     if a.mark_sorted:   # record runs sorted before the ledger existed; sort nothing
         for folder, _, _, staged_name in plan:
             record_sorted(store, staged_name, str(win_display(folder) or folder), how="marked")
@@ -699,6 +762,10 @@ def main():
     ap.add_argument("--resort", action="store_true",
                     help="[sort] Sort runs even if already sorted into this store (appends their "
                          "frames again).")
+    ap.add_argument("--include-recent", action="store_true",
+                    help="[sort] Sort runs that look like they may still be in progress (recently "
+                         "imaged per run_status.json or file times, or fewer frames than the robot "
+                         "recorded). By default these, and any newer runs, are held back.")
     ap.add_argument("--mark-sorted", action="store_true",
                     help="[sort] Record the given runs as already sorted, without sorting -- for "
                          "runs sorted before this store kept a record.")

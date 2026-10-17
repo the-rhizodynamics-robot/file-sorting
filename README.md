@@ -400,6 +400,15 @@ merged folder mixes boxes.
   and skips them next time (`--resort` overrides; it appends the frames again). Runs sorted with
   `--archive` before this record existed are recognised from their archived copy; mark other
   previously sorted runs with `--mark-sorted --images <run> …`.
+- **Runs that may still be in progress are held back**, with every newer run (sorting a later run
+  first would misorder the frames). A run counts as in progress if:
+  - the robot's `run_status.json` says `running` and was updated within ~2 cycles;
+  - fewer frames are on disk than it recorded (still copying or uploading);
+  - with no status file, its newest frame is under 30 minutes old.
+
+  A run whose robot host died (reboot, crash) stays `running` with a stale time and is sorted
+  normally. Interactively it asks first; unattended it skips with a warning. `--include-recent`
+  overrides.
 - **It stops instead of losing data:** if a run fails, if a run parks folders in `junk_review/`
   (the next sort would delete them), or if an experiment would collide with an old
   `finished_exp/<label>` folder (a recycled QR label). Fix it and run the same command again — the
@@ -442,6 +451,7 @@ requires a path — point it at any existing directory.
 | `--boxes_per_shelf` | `3` | Containers per shelf, used to sort frames into experiments. Overridden by the `…_<shelves>_<boxes>` suffix of the folder name when present. |
 | `--unzip` | `true` | Treat `images_path` as a zip and unzip it first. Set `false` for a plain folder. |
 | `--stabilize` | `true` | Stabilize the generated time-lapse videos. |
+| `--docker_memory` | `4g` | Memory ceiling for the pipeline's container; an overrun stops the container, not the machine. Raise it (e.g. `8g`) on a PC with RAM to spare. |
 | `--stab_parallax` | `0.907` | Seed-plane shift ÷ label shift for QR stabilization. Rig-specific (working distance, vessel); 0.907 was measured on the College Station rig. |
 | `--finish_only` | `false` | Skip ingest/sort; finalize **all** experiments in `current_exp/` and (re)build videos. |
 | `--finish_experiments` | `""` | Skip ingest/sort; finalize only the comma-separated experiment numbers (e.g. `100001,100002`). |

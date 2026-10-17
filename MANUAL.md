@@ -42,8 +42,17 @@ What happens:
      experiment is over.
    - **Where to put the videos.** Press Enter for the default:
      `Desktop\final_imaging_data`.
-3. It sorts each run in turn. Expect about 10–20 minutes per run, plus about an hour for
-   each batch of videos.
+3. It sorts each run in turn. Expect about 10–20 minutes per run from a local disk (much
+   longer when the images are read from a cloud-synced folder like Google Drive), plus
+   **roughly 25–40 minutes of video work for every finished box** (a ~1,600-frame box on a
+   laptop). A big experiment can take several hours: let it run, it doesn't need you.
+
+**A run that's still being imaged, or still being copied, is held back automatically.**
+Sorting a run marks it as done, so sorting one part-way through would lose its later frames
+for good. The tool spots this from the robot's `run_status.json` (or, for older runs, from
+very recent files) and skips that run, plus any newer ones, with a warning. Run the same
+command again once it's finished. If you're sure a held-back run is complete, add
+`--include-recent`.
 
 **Run it again any time.** Runs that are already sorted are skipped, so pointing at the
 same folder later only picks up the new runs. Nothing is processed twice.
@@ -89,6 +98,7 @@ again**. It carries on from where it stopped.
 | **junk review** | It couldn't read a box's QR code. Open the `junk_review` folder it shows you. For each folder you want to keep, rename it to the correct box number and move it into `re_merge`. Delete the rest. Then re-run. |
 | **in BOTH current_exp/ and finished_exp/** | A box number was used before (an old test, or reused labels). Open the `finished_exp` folder it shows you, and rename or move out the **old** folder with that number. Then re-run. |
 | **Sorting ... failed** | Something went wrong in the pipeline. Copy the error above it and send it to Isaiah. |
+| **FRAME ORDER SHIFTED** | Inside one run, the QR labels change partway through a box position: probably a photo was dropped or added mid-run (or a box was swapped). Nothing was sorted or moved. Look at that run's photos around the frame it names, then send the message to whoever maintains your setup. |
 | **Can't order these runs** | A folder name doesn't start with the robot's date and time (like `20260902080000_1_8`). Rename it, or sort it on its own. |
 
 ### Runs sorted before this version
@@ -112,6 +122,7 @@ image-sort --mark-sorted --images 'C:\Users\you\Desktop\robotic_imaging\20260902
 | Make videos for some boxes now | `image-sort --mode finish --exp 17,18` |
 | Make videos for all boxes now | `image-sort --mode finish-all` |
 | Sort a run again anyway | add `--resort` (adds its images a second time) |
+| Sort a run it held back as "in progress" | add `--include-recent` (only if you're sure it's complete) |
 | Use the menu | `image-sort` |
 
 Your videos land in `Desktop\final_imaging_data` (or wherever you chose). The tool also keeps
