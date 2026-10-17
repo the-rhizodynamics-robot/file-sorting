@@ -217,7 +217,8 @@ def label(base_path):
     for d in dirlist[1:]:
         # change to each subdirectory of sorted, unlabelled data
         os.chdir(d)
-        im_list = random.choices(listdir_nohidden(d), k=10)
+        # an empty slot per check_positions() gets a few tries, not 10 (each runs the QR detector)
+        im_list = random.choices(listdir_nohidden(d), k = EMPTY_AFTER if os.path.normpath(d) in EMPTY_POSITIONS else 10)
         crop_sum=0
 
         for img in im_list:
@@ -306,6 +307,12 @@ def read_qr(image_path):
     return barcode[0][0].decode('utf-8', 'ignore').strip().replace('/', '_').replace('\\', '_')
 
 
+# Position folders the frame-order check found to be empty slots (no QR in its first samples), so
+# label() needn't run the QR detector on 10 frames to conclude the same.
+EMPTY_POSITIONS = set()
+EMPTY_AFTER = 3   # this many sampled frames with no QR at all = an empty slot
+
+
 class FrameOrderError(RuntimeError):
     """A position folder holds different boxes at different points in the run."""
 
@@ -337,6 +344,12 @@ def check_positions(base_path, samples = 8):
             return cache[i]
         n = len(files)
         idx = sorted(set(int(round(k * (n - 1) / max(samples - 1, 1))) for k in range(samples)))
+        # Empty slots (no box, so no QR) are common, and the QR detector is the slow part: stop
+        # after the first few samples if none of them shows a code at all.
+        if len(idx) > EMPTY_AFTER and all(lab(i) is None for i in idx[:EMPTY_AFTER]):
+            EMPTY_POSITIONS.add(os.path.normpath(folder))
+            print("position " + pos + ": no QR in its first " + str(EMPTY_AFTER) + " samples -- an empty slot, not checked")
+            continue
         reads = [(i, lab(i)) for i in idx]
         readable = [(i, l) for i, l in reads if l is not None]
         if len(readable) < 2:
