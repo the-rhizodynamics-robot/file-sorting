@@ -122,8 +122,8 @@ else:
     run_name = os.path.splitext(images_path)[0]
     shelves = name_shelves if name_shelves is not None else run_name.rsplit('_', 1)[-1]
     sf.sort(run_name, shelves)
-    sf.check_positions(run_name)   # stops the run (nothing labeled) if a mid-run shift mixed boxes
-    sf.label(run_name)
+    known = sf.check_positions(run_name)   # stops the run (nothing labeled) if a mid-run shift mixed boxes
+    sf.label(run_name, known)              # reuses the check's QR reads
 
     review_needed = sf.junk_review()
 

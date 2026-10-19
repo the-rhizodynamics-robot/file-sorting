@@ -193,7 +193,29 @@ def sort(base_path, shelves):
     os.chdir("/home")
 
 
-def label(base_path):
+def _file_into_exp(d, exp_name):
+    """Move position folder `d`'s frames into current_exp/<exp_name>, appending after any frames already there."""
+    temp_path = CURRENT_EXP_PATH + "/" + str(exp_name)
+    if not os.path.isdir(temp_path):
+        os.chdir("/home")
+        shutil.move(d, temp_path)
+    else:
+        os.chdir(d)
+        base = len(listdir_nohidden(temp_path))
+        for g in listdir_nohidden("."):
+            file_counter = int(g[0:8])
+            stamps = g.split("_")[1]
+            savefile = temp_path + "/" + str(100000000 + file_counter + base)[-8:] + "_" + stamps
+            shutil.move(g, savefile)
+
+
+def label(base_path, known = None):
+    """ Label each position folder by its QR and move it into current_exp (or junk).
+
+        `known` is check_positions()'s result: {position folder: label, or EMPTY_SLOT}. Those
+        positions are filed from it without reading the QR again; any other position is read
+        here, from up to 10 random frames. """
+    known = known or {}
     current_exp_path = CURRENT_EXP_PATH
     mypathout = SORTED_UNLABELED_PATH + base_path
     junk_exp_path=JUNK_EXP_PATH
@@ -215,6 +237,19 @@ def label(base_path):
 
     # starting at index 1 skips the parent directory, which os.walk includes.  
     for d in dirlist[1:]:
+        found = known.get(os.path.normpath(d))
+        if found == EMPTY_SLOT:
+            print("Position number = " + str(os.path.basename(d)) + ": empty slot (no QR in the frame-order check). Moving to Junk Exp.")
+            os.chdir("/home")
+            shutil.move(d, junk_exp_path + "/" + os.path.splitext(os.path.basename(d))[0] + "_" + os.path.basename(mypathin) + "_0")
+            continue
+        if found is not None:
+            print("Position number = " + str(os.path.basename(d)))
+            print("Box number = " + str(found) + " (from the frame-order check)")
+            _file_into_exp(d, found)
+            os.chdir("/home")
+            continue
+
         # change to each subdirectory of sorted, unlabelled data
         os.chdir(d)
         im_list = random.choices(listdir_nohidden(d), k=10)
@@ -243,19 +278,7 @@ def label(base_path):
                 exp_name = exp_name.replace('/', '_').replace('\\', '_')
                 print("Position number = " + str(os.path.basename(d)))
                 print("Box number = " + str(exp_name))
-                temp_path = current_exp_path + "/" + str(exp_name)
-                if not os.path.isdir(temp_path):
-                    os.chdir("/home")
-                    shutil.move(d, temp_path)
-                else:
-                    onlyfiles = listdir_nohidden(temp_path)
-                    base = len(onlyfiles)
-                    new_files = listdir_nohidden(".")
-                    for g in new_files:
-                        file_counter = int(g[0:8])
-                        stamps = g.split("_")[1]
-                        savefile = temp_path + "/" + str(100000000 + file_counter + base)[-8:] + "_" + stamps 
-                        shutil.move(g, savefile)
+                _file_into_exp(d, exp_name)
             else:
                 print("QR code exists but barcode could not be read! See Junk Review.")
                 os.chdir("/home")
@@ -297,13 +320,23 @@ def _decode_qr(img, box):
 
 def read_qr(image_path):
     """The QR label in one frame, as label() would name it, or None if none can be read."""
+    return _read_qr(image_path)[1]
+
+
+def _read_qr(image_path):
+    """(whether a QR was detected at all, its label or None if none could be read)."""
     box = qr_detection(image_path)
     if len(box) == 0:
-        return None
+        return False, None
     barcode = _decode_qr(cv2.imread(image_path, 0), np.asarray(box).astype(float).astype(int))
     if not barcode:
-        return None
-    return barcode[0][0].decode('utf-8', 'ignore').strip().replace('/', '_').replace('\\', '_')
+        return True, None
+    return True, barcode[0][0].decode('utf-8', 'ignore').strip().replace('/', '_').replace('\\', '_')
+
+
+# check_positions() result for a position with no QR detected in any sample: no box there.
+EMPTY_SLOT = "<empty slot>"
+EMPTY_AFTER = 3   # this many leading samples with no QR detected = an empty slot (the detector is the slow part)
 
 
 class FrameOrderError(RuntimeError):
@@ -323,28 +356,43 @@ def check_positions(base_path, samples = 8):
         leading shift like that leaves every other frame correctly grouped. Any other
         disagreement is bisected to the frame where the label changes and raised as
         FrameOrderError: nothing has been labeled or moved yet, and the source run is
-        untouched. """
+        untouched.
+
+        Returns what it learned for label(), so the QR isn't read all over again:
+        {position folder: its label, or EMPTY_SLOT if no QR was detected in the first
+        EMPTY_AFTER samples}. A position where a QR was detected but never read is left
+        out, and label() reads it itself (and sends it to junk review if it can't). """
     run_dir = SORTED_UNLABELED_PATH + base_path
+    known = {}
     for pos in sorted(os.listdir(run_dir), key = lambda n: int(n) if n.isdigit() else 0):
         folder = os.path.join(run_dir, pos)
         files = sorted(listdir_nohidden(folder))
         if not files:
             continue
         cache = {}
-        def lab(i):
+        def read(i):
             if i not in cache:
-                cache[i] = read_qr(os.path.join(folder, files[i]))
+                cache[i] = _read_qr(os.path.join(folder, files[i]))
             return cache[i]
+        def lab(i):
+            return read(i)[1]
         n = len(files)
         idx = sorted(set(int(round(k * (n - 1) / max(samples - 1, 1))) for k in range(samples)))
+        if not any(read(i)[0] for i in idx[:EMPTY_AFTER]):
+            print("position " + pos + ": no QR in its first " + str(min(EMPTY_AFTER, len(idx))) + " samples -- an empty slot")
+            known[os.path.normpath(folder)] = EMPTY_SLOT
+            continue
         reads = [(i, lab(i)) for i in idx]
         readable = [(i, l) for i, l in reads if l is not None]
         if len(readable) < 2:
             print("position " + pos + ": too few readable QR codes to check (" + str(len(readable)) + ")")
+            if readable:
+                known[os.path.normpath(folder)] = readable[0][1]
             continue
         labels = [l for _, l in readable]
         if len(set(labels)) == 1:
             print("position " + pos + ": frame order OK (" + labels[0] + ", " + str(len(readable)) + " reads)")
+            known[os.path.normpath(folder)] = labels[0]
             continue
         last = readable[-1][1]
         # Only the first frame disagrees, and the next one already reads the right label: a stray lead frame.
@@ -354,6 +402,7 @@ def check_positions(base_path, samples = 8):
             shutil.move(os.path.join(folder, files[0]), os.path.join(dst, files[0]))
             print("WARNING position " + pos + ": the first frame reads '" + str(readable[0][1]) + "' but the rest read '"
                   + last + "' -- a stray frame before the first sweep; set aside in " + dst)
+            known[os.path.normpath(folder)] = last
             continue
         # Find the first change and bisect it down to the exact frame.
         for (a, la), (b, lb) in zip(readable, readable[1:]):
@@ -376,6 +425,7 @@ def check_positions(base_path, samples = 8):
             + "). A frame was probably dropped or added mid-run, so boxes would be mixed. Nothing was labeled"
             + " or moved; the source run is untouched. Check the run around that point. Labels sampled: "
             + ", ".join(str(i) + ":" + str(l) for i, l in reads))
+    return known
 
 
 def qr_detection(image_path):
