@@ -527,16 +527,19 @@ def make_videos(exp_name, stabilize = True, parallax = None):
     start = time.time()
     src = FINISHED_EXP_PATH + exp_name + "/"
     os.chdir(src)
-    command = 'ffmpeg -framerate 15 -pattern_type glob -i \"' + "*" + _dominant_ext(src) + '\" -c:v libx264 -preset faster -threads 4 -crf 24 -pix_fmt yuv420p outfile.mp4'
-    subprocess.call(command, shell=True)
+    # the unstabilized video straight from the frames; with QR stabilization it's instead
+    # written in the same pass as the stabilized one, so each frame is decoded once
+    command = 'ffmpeg -y -framerate 15 -pattern_type glob -i \"' + "*" + _dominant_ext(src) + '\" -c:v libx264 -preset faster -threads 4 -crf 24 -pix_fmt yuv420p outfile.mp4'
 
     if stabilize:
         try:
-            info = qr_stabilize.stabilize_experiment(src, src + "outfile_stabilized.mp4", parallax=parallax)
+            info = qr_stabilize.stabilize_experiment(src, src + "outfile_stabilized.mp4", parallax=parallax,
+                                                     plain_path=src + "outfile.mp4")
             print("Stabilized " + exp_name + " on its QR label (parallax " + str(parallax) + ")"
                   + ("; CHECK: possible box move at " + str(len(info["jumps"])) + " frame(s)" if info["jumps"] else ""))
         except Exception as e:
             print("WARNING: QR stabilization failed for " + exp_name + " (" + str(e) + "); falling back to vid.stab")
+            subprocess.call(command, shell=True)
             command = 'ffmpeg -y -threads 4 -i outfile.mp4 -vf vidstabdetect=shakiness=5:accuracy=15:stepsize=6:mincontrast=0.1:result=transforms.trf -f null -'
             subprocess.call(command, shell=True)
             command = 'ffmpeg -y -threads 4 -i outfile.mp4 -vf vidstabtransform=input=transforms.trf:smoothing=30:optzoom=1 -c:v libx264 -preset faster -threads 4 outfile_stabilized.mp4'
@@ -546,6 +549,7 @@ def make_videos(exp_name, stabilize = True, parallax = None):
         shutil.copy(src + "outfile_stabilized.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
         os.remove(src + "outfile_stabilized.mp4")
     else:
+        subprocess.call(command, shell=True)
         shutil.copy(src + "outfile.mp4", STABILIZED_VIDEO_PATH + exp_name + ".mp4")
 
     shutil.copy(src + "outfile.mp4", FINAL_VIDEO_PATH + exp_name + ".mp4")

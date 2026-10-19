@@ -197,28 +197,45 @@ def shift(frame, dx, dy):
     return cv2.warpAffine(frame, m, (frame.shape[1], frame.shape[0]), flags=cv2.INTER_LINEAR)
 
 
-def write_video(paths, offsets, out_path, fps=15, crf=24, parallax=1.0):
+def _encoder(out_path, w, h, fps, crf):
+    """An ffmpeg process encoding raw BGR frames from stdin (the pipeline's codec settings)."""
+    return subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
+         "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "-",
+         "-c:v", "libx264", "-preset", "faster", "-threads", "4", "-crf", str(crf), "-pix_fmt", "yuv420p", out_path],
+        stdin=subprocess.PIPE)
+
+
+def write_video(paths, offsets, out_path, fps=15, crf=24, parallax=1.0, plain_path=None):
     """Shift each full-colour frame, crop to the common area and encode once (same codec
     settings as the pipeline's unstabilized video). offsets are the label's, from
     measure_offsets(); parallax scales them to the plane that should hold still (1.0 = the
-    label itself)."""
+    label itself). plain_path: also encode the frames as they are (the unstabilized video)
+    from the same decode, rather than decoding every frame again in a separate pass."""
     offsets = np.asarray(offsets) * parallax
-    proc, crop = None, None
-    for k, path in enumerate(paths):
-        f = cv2.imread(str(path))
-        if crop is None:
-            crop = common_crop(f.shape, offsets)
-            x0, y0, x1, y1 = crop
-            proc = subprocess.Popen(
-                ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                 "-s", "%dx%d" % (x1 - x0, y1 - y0), "-r", str(fps), "-i", "-",
-                 "-c:v", "libx264", "-preset", "faster", "-threads", "4", "-crf", str(crf), "-pix_fmt", "yuv420p", out_path],
-                stdin=subprocess.PIPE)
-        s = shift(f, offsets[k, 0], offsets[k, 1])
-        proc.stdin.write(np.ascontiguousarray(s[y0:y1, x0:x1]).tobytes())
-    proc.stdin.close()
-    if proc.wait() != 0:
-        raise RuntimeError("ffmpeg failed writing " + out_path)
+    procs, crop = [], None
+    try:
+        for k, path in enumerate(paths):
+            f = cv2.imread(str(path))
+            if f is None:
+                raise ValueError("unreadable image: %s" % path)
+            if crop is None:
+                crop = common_crop(f.shape, offsets)
+                x0, y0, x1, y1 = crop
+                procs.append(_encoder(out_path, x1 - x0, y1 - y0, fps, crf))
+                if plain_path:
+                    procs.append(_encoder(plain_path, f.shape[1] // 2 * 2, f.shape[0] // 2 * 2, fps, crf))
+            # shift() then crop, in one step: warp only the pixels that are kept
+            m = np.float32([[1, 0, -offsets[k, 0] - x0], [0, 1, -offsets[k, 1] - y0]])
+            procs[0].stdin.write(cv2.warpAffine(f, m, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR).tobytes())
+            if plain_path:
+                procs[1].stdin.write(np.ascontiguousarray(f[:f.shape[0] // 2 * 2, :f.shape[1] // 2 * 2]).tobytes())
+    finally:
+        for p in procs:
+            p.stdin.close()
+        failed = [p for p in procs if p.wait() != 0]
+    if failed:
+        raise RuntimeError("ffmpeg failed writing " + out_path + (" / " + plain_path if plain_path else ""))
     return crop
 
 
@@ -249,10 +266,11 @@ def write_offsets(folder, names, offsets, scores, info, parallax):
 
 
 def stabilize_experiment(folder, out_path, parallax=PARALLAX_COLLEGE_STATION, fps=15, crf=24,
-                         log=print):
+                         log=print, plain_path=None):
     """Measure a finished experiment's frames, write stabilization.json beside them, and render
-    the stabilized video to out_path. Raises ValueError when there's no usable label (the
-    caller falls back to vid.stab)."""
+    the stabilized video to out_path (and the unstabilized one to plain_path, if given, from the
+    same pass). Raises ValueError when there's no usable label (the caller falls back to
+    vid.stab)."""
     names = sorted(n for n in os.listdir(folder)
                    if n.lower().endswith(IMAGE_EXTENSIONS) and not n.startswith("."))
     if len(names) < 2:
@@ -260,5 +278,5 @@ def stabilize_experiment(folder, out_path, parallax=PARALLAX_COLLEGE_STATION, fp
     paths = [os.path.join(folder, n) for n in names]
     offsets, scores, info = measure_offsets(paths, log=log)
     write_offsets(folder, names, offsets, scores, info, parallax)
-    write_video(paths, offsets, out_path, fps=fps, crf=crf, parallax=parallax)
+    write_video(paths, offsets, out_path, fps=fps, crf=crf, parallax=parallax, plain_path=plain_path)
     return info
