@@ -15,7 +15,8 @@ smooths the path, and zooms (changing the image scale by an unrecorded amount).
 stabilization.json, written into the experiment folder beside its frames, records each frame's
 label offset keyed by filename, so root-tracking can stabilize the same frames exactly.
 
-Frames are read from disk one at a time: a box of 3000x3000 frames is ~3 GB in memory.
+Frames are streamed from disk, never all loaded: a box of 3000x3000 frames is ~3 GB in memory.
+WORKERS threads decode them a few frames ahead (at most WORKERS + 1 held at once).
 
 Parallax: the label sits nearer the camera than the seeds, so a sideways camera move shifts
 it further in the image. Aligning the label exactly leaves the seeds off by the difference
@@ -31,11 +32,14 @@ Python 3.7-compatible (the processing container).
 import json
 import os
 import subprocess
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
 
 PARALLAX_COLLEGE_STATION = 0.907   # seed-plane shift / label shift; see module docstring
+WORKERS = 3   # threads decoding frames ahead of the matching / encoding (OpenCV releases the GIL)
 OFFSETS_NAME = "stabilization.json"
 OFFSETS_FORMAT = "qr-stabilization/1"
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
@@ -82,6 +86,19 @@ def _subpixel(r, i, j):
     di = one(r[i - 1, j], r[i, j], r[i + 1, j]) if 0 < i < r.shape[0] - 1 else 0.0
     dj = one(r[i, j - 1], r[i, j], r[i, j + 1]) if 0 < j < r.shape[1] - 1 else 0.0
     return i + di, j + dj
+
+
+def _ahead(fn, items, workers=WORKERS):
+    """fn(item) for each item, in order, computed on `workers` threads at most workers + 1
+    items ahead -- so only that many decoded frames are ever held at once."""
+    with ThreadPoolExecutor(workers) as ex:
+        pending = deque()
+        for item in items:
+            pending.append(ex.submit(fn, item))
+            if len(pending) > workers:
+                yield pending.popleft().result()
+        while pending:
+            yield pending.popleft().result()
 
 
 def _gray(path):
@@ -143,8 +160,7 @@ def measure_offsets(paths, ref_index=1, search=500, binarize=True, min_score=0.5
     offsets, scores = np.full((len(paths), 2), np.nan), np.zeros(len(paths))
     last = (0.0, 0.0)          # search around the previous match, so after a box move only
     widened, rejected = [], [] # the first moved frame needs a wider search
-    for k, path in enumerate(paths):
-        g = _gray(path)
+    for k, g in enumerate(_ahead(_gray, paths)):   # matching stays in order: it searches near the last match
         for level, reach in enumerate(widen_to(search, g.shape)):
             hit = _match(g, tmpl, (x0, y0, x1, y1), last, reach, binarize)
             if hit is not None and hit[1] >= min_score:
@@ -198,11 +214,14 @@ def shift(frame, dx, dy):
 
 
 def _encoder(out_path, w, h, fps, crf):
-    """An ffmpeg process encoding raw BGR frames from stdin (the pipeline's codec settings)."""
+    """An ffmpeg process encoding raw BGR frames from stdin (the pipeline's codec settings).
+    Two run at once beside the sorter's QR model, inside the container's memory cap: at
+    3000x3000 one encoder peaks ~1.3 GB with x264's default lookahead, ~1.0 GB with 10."""
     return subprocess.Popen(
         ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
          "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "-",
-         "-c:v", "libx264", "-preset", "faster", "-threads", "4", "-crf", str(crf), "-pix_fmt", "yuv420p", out_path],
+         "-c:v", "libx264", "-preset", "faster", "-threads", "4", "-rc-lookahead", "10", "-crf", str(crf),
+         "-pix_fmt", "yuv420p", out_path],
         stdin=subprocess.PIPE)
 
 
@@ -213,23 +232,33 @@ def write_video(paths, offsets, out_path, fps=15, crf=24, parallax=1.0, plain_pa
     label itself). plain_path: also encode the frames as they are (the unstabilized video)
     from the same decode, rather than decoding every frame again in a separate pass."""
     offsets = np.asarray(offsets) * parallax
-    procs, crop = [], None
+
+    def read(path):
+        f = cv2.imread(str(path))
+        if f is None:
+            raise ValueError("unreadable image: %s" % path)
+        return f
+
+    h, w = read(paths[0]).shape[:2]
+    crop = x0, y0, x1, y1 = common_crop((h, w), offsets)
+
+    def frame(k):
+        """Frame k decoded, shifted and cropped in one step (warping only the pixels kept), plus
+        the unshifted frame if wanted -- run on the worker threads."""
+        f = read(paths[k])
+        m = np.float32([[1, 0, -offsets[k, 0] - x0], [0, 1, -offsets[k, 1] - y0]])
+        stab = cv2.warpAffine(f, m, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR)
+        return stab, (np.ascontiguousarray(f[:h // 2 * 2, :w // 2 * 2]) if plain_path else None)
+
+    procs = []
     try:
-        for k, path in enumerate(paths):
-            f = cv2.imread(str(path))
-            if f is None:
-                raise ValueError("unreadable image: %s" % path)
-            if crop is None:
-                crop = common_crop(f.shape, offsets)
-                x0, y0, x1, y1 = crop
-                procs.append(_encoder(out_path, x1 - x0, y1 - y0, fps, crf))
-                if plain_path:
-                    procs.append(_encoder(plain_path, f.shape[1] // 2 * 2, f.shape[0] // 2 * 2, fps, crf))
-            # shift() then crop, in one step: warp only the pixels that are kept
-            m = np.float32([[1, 0, -offsets[k, 0] - x0], [0, 1, -offsets[k, 1] - y0]])
-            procs[0].stdin.write(cv2.warpAffine(f, m, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR).tobytes())
+        procs.append(_encoder(out_path, x1 - x0, y1 - y0, fps, crf))
+        if plain_path:
+            procs.append(_encoder(plain_path, w // 2 * 2, h // 2 * 2, fps, crf))
+        for stab, plain in _ahead(frame, range(len(paths))):
+            procs[0].stdin.write(stab.tobytes())
             if plain_path:
-                procs[1].stdin.write(np.ascontiguousarray(f[:f.shape[0] // 2 * 2, :f.shape[1] // 2 * 2]).tobytes())
+                procs[1].stdin.write(plain.tobytes())
     finally:
         for p in procs:
             p.stdin.close()
